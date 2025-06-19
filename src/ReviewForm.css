@@ -1,0 +1,51 @@
+/* src/ReviewForm.css */
+
+.review-form {
+    margin-top: 2rem;
+    padding: 1.5rem;
+    background-color: #faf7f4;
+    border-radius: 8px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+    font-family: 'Noto Sans JP', sans-serif;
+  }
+  
+  .review-form h4 {
+    font-size: 1.2rem;
+    margin-bottom: 1rem;
+    color: #4a3f35;
+  }
+  
+  .review-form label {
+    display: block;
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+    color: #3d3d3d;
+  }
+  
+  .review-form select,
+  .review-form textarea {
+    width: 100%;
+    padding: 0.6rem;
+    border: 1px solid #d0cfcf;
+    border-radius: 6px;
+    font-size: 1rem;
+    background-color: #fff;
+  }
+  
+  .review-form button {
+    margin-top: 1.5rem;
+    padding: 0.7rem 1.5rem;
+    background-color: #6b4f3b;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 1rem;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+  }
+  
+  .review-form button:hover {
+    background-color: #5c4130;
+  }
+  

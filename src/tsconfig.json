@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "esnext", // 最新のJS構文を使う前提でOK
+    "module": "esnext", // ES Modules（import/export）を使う前提でOK
+    "jsx": "react-jsx", // React 17以降で導入された新JSX変換対応（OK）
+    "moduleResolution": "node", // Node.js スタイルのモジュール解決（OK）
+    "esModuleInterop": true, // CommonJSとの互換性（OK）
+    "forceConsistentCasingInFileNames": true, // 大文字小文字のミス防止（推奨）
+    "strict": true, // 厳格モード（推奨）
+    "skipLibCheck": true, // ライブラリの型チェックをスキップ（開発効率向上）
+    "resolveJsonModule": true, // JSONファイルをimportしたい場合に必要
+    "isolatedModules": true, // Babelなどのトランスパイラ併用で推奨
+    "noFallthroughCasesInSwitch": true, // switch文の意図しないフォールスルーを防ぐ
+  }
+}

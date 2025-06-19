@@ -1,0 +1,782 @@
+/* Google Fonts を読み込んでいる前提（index.htmlに<link>済み） */
+
+body {
+  margin: 0;
+  font-family: "Noto Serif JP", serif;
+  background-color: #ffffff;
+  color: #333;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+h2, h3, h4 {
+  margin-top: 0;
+  color: #3a2e1f;
+  font-family: "Noto Serif JP", serif;
+}
+
+/* ▼▼▼ 青いリンクやボタン・アイコンを黒に統一 ▼▼▼ */
+
+a,
+button,
+input,
+select,
+.menu-dropdown a,
+.search-dropdown button,
+.search-dropdown select,
+.search-dropdown input {
+  color: #333;
+}
+
+a:hover,
+button:hover {
+  color: #000;
+}
+
+.search-icon svg,
+.menu-icon svg,
+.close-icon svg,
+.fa-magnifying-glass {
+  color: #333 !important;
+}
+
+a[href^="tel"],
+a[href^="mailto"] {
+  color: #333;
+  text-decoration: none;
+}
+
+/* ▲▲▲ 色調整ここまで ▲▲▲ */
+
+
+/* セクション共通スタイル */
+.about-section,
+.features-section,
+.search-section,
+.teacher-list,
+.teacher-profile,
+.privacy-policy-section {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 5rem 1.5rem 3rem 1.5rem;
+  background-color: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  animation: fadeInUp 0.6s ease-out both;
+  text-align: left;
+}
+
+/* セクションタイトル調整 */
+.about-section h2,
+.features-section h3,
+.search-section h3,
+.teacher-list h3,
+.privacy-policy-section h2.section-title {
+  font-size: 1.8rem;
+  border-left: 3px solid #b89f6b;
+  padding-left: 0.8rem;
+  margin-bottom: 3rem;
+  color: #3a2e1f;
+  margin-top: 4rem;
+}
+
+.privacy-policy-section {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 5rem 1.5rem 3rem 1.5rem;
+  background-color: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  animation: fadeInUp 0.6s ease-out both;
+  text-align: left;
+}
+
+.privacy-policy-section h2.section-title {
+  font-size: 1.8rem;
+  text-align: center;
+  border-left: none;
+  color: #3a2e1f;
+  margin-top: 4rem;
+  margin-bottom: 1rem;
+}
+
+/* セクション間の行間を狭める */
+.features-section {
+  margin-bottom: 3rem;
+}
+
+.search-section {
+  margin-bottom: 4rem;
+}
+
+/* プライバシーポリシー用タイトル */
+.privacy-content h3 {
+  font-size: 1.2rem;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  border-left: 3px solid #b89f6b;
+  padding-left: 0.6rem;
+  color: #4a392a;
+}
+
+.privacy-content p,
+.privacy-content li {
+  line-height: 1.8;
+  margin-bottom: 0.8rem;
+}
+
+.privacy-content ul {
+  padding-left: 1.5rem;
+}
+
+/* 検索セレクター */
+.selectors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.selectors select {
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-family: "Noto Serif JP", serif;
+}
+
+/* 講師ボタン */
+.teacher-button {
+  display: block;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  background-color: #f6f2eb;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  font-family: "Noto Serif JP", serif;
+}
+
+.teacher-button:hover {
+  background-color: #ede6da;
+}
+
+/* 講師プロフィール */
+.teacher-profile {
+  margin-top: 2rem;
+}
+
+.teacher-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.teacher-info h2 {
+  margin-bottom: 0;
+}
+
+.teacher-info .furigana {
+  display: block;
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.teacher-image {
+  width: 100%;
+  max-width: 240px;
+  height: auto;
+  border-radius: 8px;
+}
+
+@media (max-width: 768px) {
+  .teacher-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .selectors {
+    flex-direction: column;
+  }
+
+  .footer .footer-links {
+    flex-direction: column;
+    gap: 0.8rem;
+  }
+
+  .teacher-image {
+    max-width: 160px;
+  }
+}
+
+/* コース表 */
+.course-table table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+.course-table th,
+.course-table td {
+  border: 1px solid #ccc;
+  padding: 0.6rem;
+  text-align: left;
+  font-family: "Noto Serif JP", serif;
+}
+
+.course-table td:first-child,
+.course-table th:first-child {
+  width: 60px; /* ✅ 固定幅に制限（調整可） */
+  text-align: center;
+}
+
+.reserve-button {
+  display: inline-block;
+  margin-top: 1rem;
+  padding: 0.6rem 1.2rem;
+  background-color: #b89f6b;
+  color: white;
+  border-radius: 6px;
+  text-align: center;
+  font-family: "Noto Serif JP", serif;
+}
+
+/* フッター */
+.footer {
+  background-color: #222;
+  color: white;
+  padding: 2.5rem 1rem 1rem;
+  text-align: center;
+  font-family: "Noto Serif JP", serif;
+}
+
+.footer .footer-content {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.footer .footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  justify-content: center;
+}
+
+.footer .footer-links a {
+  color: #fff;
+  font-size: 0.95rem;
+  text-decoration: none;
+}
+
+.footer p {
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+
+/* アニメーション */
+@keyframes fadeInUp {
+  0% {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* レスポンシブ */
+@media (max-width: 768px) {
+  .teacher-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .selectors {
+    flex-direction: column;
+  }
+
+  .footer .footer-links {
+    flex-direction: column;
+    gap: 0.8rem;
+  }
+}
+
+/* 運営者情報セクション */
+.operator-info-section {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 5rem 1.5rem 3rem 1.5rem;
+  background-color: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  animation: fadeInUp 0.6s ease-out both;
+  text-align: left;
+}
+
+.operator-info-section h2.section-title {
+  font-size: 1.8rem;
+  text-align: center;
+  border-left: none;
+  color: #3a2e1f;
+  margin-top: 4rem;
+  margin-bottom: 1rem;
+}
+
+.operator-content h3 {
+  font-size: 1.2rem;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  border-left: 3px solid #b89f6b;
+  padding-left: 0.6rem;
+  color: #4a392a;
+}
+
+.operator-content p,
+.operator-content li {
+  line-height: 1.8;
+  margin-bottom: 0.8rem;
+}
+
+.operator-content ul {
+  padding-left: 1.5rem;
+}
+
+/* ページ全体が画面高に収まるようにする */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* 中央の可変コンテンツ部分 */
+.main-content {
+  flex: 1;
+}
+
+.review-button-wrapper {
+  margin-top: 1.5rem;
+  margin-bottom: 2rem; /* レビュー一覧との間にゆとりを確保 */
+}
+
+.about-section.enhanced {
+  background-color: #f9f7f3;
+  padding: 3rem 2rem;
+  border-radius: 12px;
+  margin-top: 4rem;
+  margin-bottom: 3rem;
+  box-shadow: 0 0 12px rgba(0, 0, 0, 0.05);
+}
+
+.about-section.enhanced h2 {
+  font-size: 2rem;
+  font-weight: bold;
+  border-left: 3px solid #b89f6b;
+  padding-left: 1rem;
+  margin-bottom: 1rem;
+}
+
+.catch-copy {
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: #7c5b3e;
+  margin-bottom: 1rem;
+}
+
+.teacher-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2rem;
+  justify-content: center;
+  margin-top: 2rem;
+}
+
+.teacher-card {
+  background-color: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: transform 0.3s ease;
+}
+
+.teacher-card:hover {
+  transform: translateY(-4px);
+}
+
+.teacher-image {
+  width: 100%;
+  max-width: 240px;
+  height: auto;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.teacher-info {
+  text-align: left;
+  width: 100%;
+}
+
+.teacher-name {
+  font-size: 1.3rem;
+  font-weight: bold;
+  margin-bottom: 0.2rem;
+  color: #3a2e1f;
+}
+
+.teacher-furigana {
+  font-size: 0.95rem;
+  color: #666;
+  margin-bottom: 0.5rem;
+}
+
+.teacher-subject,
+.teacher-location,
+.teacher-profile {
+  margin-bottom: 0.6rem;
+  font-size: 0.95rem;
+}
+
+.teacher-courses {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+}
+
+.teacher-course {
+  font-size: 0.95rem;
+  margin-bottom: 0.4rem;
+}
+
+.teacher-card {
+  display: block !important;
+  margin-top: 2rem;
+  padding: 1rem;
+  border: 1px solid #ccc;
+  background: white;
+  max-width: 600px;
+}
+
+.teacher-image {
+  width: 100%;
+  max-width: 300px;
+  height: auto;
+  display: block;
+  margin-bottom: 1rem;
+}
+
+.contact-outer {
+  display: flex;
+  justify-content: center;
+  padding-top: 120px; /* ヘッダーと重ならないように */
+  padding-bottom: 60px;
+}
+
+.contact-inner {
+  text-align: left;
+  max-width: 500px;
+  width: 90%;
+}
+
+.contact-title {
+  text-align: center;
+  margin-bottom: 2rem;
+  font-size: 1.8rem;
+  font-weight: bold;
+}
+
+.contact-text-block p {
+  margin: 1rem 0;
+  font-size: 1.1rem;
+}
+
+
+.contact-heading {
+  font-size: 1.8rem;
+  font-weight: bold;
+  color: #3d2b1f;
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.contact-content {
+  text-align: left;
+  font-size: 1rem;
+  color: #3d2b1f;
+  line-height: 2;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.contact-content p {
+  margin-bottom: 1.2rem;
+}
+
+.contact-link {
+  color: #3d2b1f;
+  text-decoration: underline;
+}
+
+/* ▼▼▼ contact-section（統一後）▼▼▼ */
+.contact-section {
+  margin-top: 80px; /* ヘッダーとの被り防止 */
+  background-color: #fdfaf5;
+  border-radius: 12px;
+  padding: 3rem;
+  max-width: 900px;
+  margin-left: auto;
+  margin-right: auto;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+.contact-section .section-title {
+  text-align: center;
+}
+
+/* ▼▼▼ アニメーションクラス定義（不足していた場合）▼▼▼ */
+@keyframes fadeInUp {
+  0% {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in-up {
+  animation: fadeInUp 0.6s ease-out both;
+}
+
+
+/* ▼▼▼ お問い合わせタイトルの位置・スタイルを統一 ▼▼▼ */
+.contact-section h2.section-title {
+  font-size: 1.8rem;
+  text-align: center;
+  border-left: none;
+  color: #3a2e1f;
+  margin-top: 4rem;
+  margin-bottom: 1rem;
+}
+
+
+/* ▼▼▼ teacher-list のヘッダー重なり防止 ▼▼▼ */
+.teacher-list {
+  padding-top: 120px;
+  scroll-margin-top: 120px;
+}
+
+.teacher-name {
+  font-size: 1.8rem;
+  font-weight: bold;
+  color: #2c2c2c;
+}
+
+.teacher-kana {
+  font-size: 1.2rem;
+  font-weight: 500;
+  color: #555;
+}
+
+.teacher-genre {
+  font-size: 1.2rem;
+  font-style: italic;
+  color: #3a2e1f;
+}
+
+.terms-section-title {
+  border-left: 3px solid #c5a46d;
+  padding-left: 12px;
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: #333;
+}
+
+.terms-title {
+  text-align: center;
+  font-size: 1.8rem;
+  font-weight: bold;
+  margin: 2rem 0 1rem;
+  color: #3a2e1f;
+  border: none;
+  padding-left: 0;
+}
+
+.teacher-name-row {
+  display: flex;
+  flex-direction: column; /* タグを下に配置 */
+  gap: 0.2rem;
+  margin-bottom: 0.5rem;
+}
+
+.teacher-tags {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.tag {
+  display: flex;
+  align-items: center;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.6rem;
+  background-color: #f0f4ff; /* 淡いブルー系背景 */
+  color: #0a3d62; /* 少し濃い青系文字色 */
+  border-radius: 12px;
+  border: 1px solid #aac4e5;
+  gap: 0.3rem; /* アイコンと文字の間隔 */
+}
+
+.section-title {
+  text-align: center;
+  font-size: 1.8rem;
+  font-weight: bold;
+  margin-bottom: 2rem;
+}
+
+/* 棒線付き中央見出し */
+.centered-heading-with-border {
+  display: block;
+  text-align: center;
+  margin: 2rem 0;
+}
+
+.centered-heading-with-border span {
+  display: inline-block;
+  border-left: 4px solid #b89f6b;
+  padding-left: 1rem;
+  font-size: 1.5rem;
+  font-weight: bold;
+}
+
+/* 親のborder-leftを無効化するために任意で使う */
+.no-about-section {
+  border-left: none !important;
+  padding-left: 0 !important;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 1.5rem;
+}
+
+.form-label {
+  font-weight: bold;
+  margin-bottom: 0.3rem;
+}
+
+.form-input,
+.form-textarea {
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 1rem;
+  width: 100%;
+}
+
+.form-error {
+  color: red;
+  font-size: 0.85rem;
+  margin-top: 0.3rem;
+}
+
+.form-button {
+  background-color: #b89f6b;
+  color: white;
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  font-weight: bold;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+  transition: background-color 0.3s ease;
+}
+
+.form-button:hover {
+  background-color: #a07f4f;
+}
+
+.required-label {
+  color: red;
+  font-weight: normal;
+  font-size: 0.9rem;
+  margin-left: 0.3rem;
+}
+
+.optional-label {
+  color: #999;
+  font-size: 0.9rem;
+  margin-left: 0.3rem;
+}
+
+.titled-section {
+  position: relative;
+  padding-left: 1.5rem;
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #3c2f1e;
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+}
+
+.titled-section::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 4px;
+  height: 100%;
+  background-color: #b89f6b;
+  border-radius: 2px;
+}
+
+/* 上部に余白を追加してヘッダーと重ならないようにする */
+.titled-section-page {
+  padding-top: 2rem;
+}
+
+/* 中央揃え見出し */
+.titled-section {
+  text-align: center;
+  margin: 2rem auto 1rem auto;
+}
+
+/* タイトル左に縦棒を表示 */
+.titled-text {
+  position: relative;
+  display: inline-block;
+  padding-left: 1.2rem;
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #3c2f1e;
+}
+
+.titled-text::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.1em;
+  width: 4px;
+  height: 1.2em;
+  background-color: #b89f6b;
+  border-radius: 2px;
+}
+
