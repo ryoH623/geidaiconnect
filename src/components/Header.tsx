@@ -1,8 +1,9 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faMagnifyingGlass } from '@fortawesome/free-solid-svg-icons';
+import { faMagnifyingGlass, faUser } from '@fortawesome/free-solid-svg-icons';
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
 import "./Header.css";
+import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
 
 interface HeaderProps {
   onMenuClick?: () => void;
@@ -13,8 +14,9 @@ export default function Header({ onMenuClick }: HeaderProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [keyword, setKeyword] = useState("");
   const [category, setCategory] = useState("");
-
   const navigate = useNavigate();
+
+  const { user, role } = useAuth();
 
   const handleReset = () => {
     setKeyword("");
@@ -22,11 +24,11 @@ export default function Header({ onMenuClick }: HeaderProps) {
   };
 
   const handleSearch = () => {
-    const params = new URLSearchParams();
-    if (keyword) params.append("keyword", keyword);
-    if (category) params.append("category", category);
-    navigate(`/search?${params.toString()}`);
-    setSearchOpen(false);
+    alert(`検索: キーワード=${keyword}, カテゴリ=${category}`);
+  };
+
+  const handleProfileClick = () => {
+    navigate("/profile");
   };
 
   return (
@@ -44,11 +46,20 @@ export default function Header({ onMenuClick }: HeaderProps) {
           <div className="menu-dropdown">
             <button className="close-icon" onClick={() => setMenuOpen(false)}>✕</button>
             <hr />
-            <Link to="/history">履歴情報</Link>
-            <Link to="/profile">会員情報</Link>
+            <Link to="/history" onClick={() => setMenuOpen(false)}>履歴情報</Link>
+            <Link to="/profile" onClick={() => setMenuOpen(false)}>会員情報</Link>
             <hr />
-            <Link to="/faq">よくあるご質問</Link>
-            <Link to="/logout">ログアウト</Link>
+            <Link to="/faq" onClick={() => setMenuOpen(false)}>よくあるご質問</Link>
+
+            {/* ✅ ログイン中かつ講師の場合のみ表示 */}
+            {user && role === "teacher" && (
+              <>
+                <Link to="/schedule-form" onClick={() => setMenuOpen(false)}>スケジュール登録</Link>
+                <Link to="/schedule-list" onClick={() => setMenuOpen(false)}>スケジュール一覧</Link>
+              </>
+            )}
+
+            <Link to="/logout" onClick={() => setMenuOpen(false)}>ログアウト</Link>
             <hr />
           </div>
         )}
@@ -89,7 +100,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
         )}
       </div>
 
-      {/* 中央：ロゴ（リンク付き） */}
+      {/* 中央：ロゴ */}
       <div className="center">
         <Link to="/" className="logo-link">
           <img
@@ -98,6 +109,13 @@ export default function Header({ onMenuClick }: HeaderProps) {
             className="logo-image"
           />
         </Link>
+      </div>
+
+      {/* 右：マイページアイコン */}
+      <div className="right">
+        <button className="profile-icon" onClick={handleProfileClick}>
+          <FontAwesomeIcon icon={faUser} />
+        </button>
       </div>
     </header>
   );

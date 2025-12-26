@@ -1,13 +1,27 @@
 import React, { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom'; 
 import BookingCalendar from '../components/booking/BookingCalendar';
 import { db } from '../firebase';
-import { collection, addDoc, Timestamp } from 'firebase/firestore';
+import {
+  collection,
+  addDoc,
+  Timestamp,
+  getDocs,
+  getDoc,
+  query,
+  where,
+  doc,
+} from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import '../index.css';
+import {
+  sendReservationEmail,
+  sendTeacherNotificationEmail,
+} from '../utils/sendEmail';
 
 const ReservationForm: React.FC = () => {
   const location = useLocation();
+  const navigate = useNavigate(); 
   const queryParams = new URLSearchParams(location.search);
   const teacherName = decodeURIComponent(queryParams.get('teacher') || '');
   const lessonCourse = decodeURIComponent(queryParams.get('course') || '');
@@ -26,7 +40,6 @@ const ReservationForm: React.FC = () => {
   const [submitted, setSubmitted] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
-  // 🔽 ログインユーザーから初期値を取得
   useEffect(() => {
     const auth = getAuth();
     const user = auth.currentUser;
@@ -86,13 +99,53 @@ const ReservationForm: React.FC = () => {
 
   const handleConfirm = (e: React.FormEvent) => {
     e.preventDefault();
-    if (validate()) {
+
+    if (!validate()) return;
+
+    const auth = getAuth();
+    const user = auth.currentUser;
+
+    if (user) {
       setConfirming(true);
+    } else {
+      alert('ログインが必要です。ログインページへ移動します。');
+      navigate('/login');
     }
   };
 
   const handleFinalSubmit = async () => {
     try {
+      const teachersRef = collection(db, 'teachers');
+      const q = query(teachersRef, where('name', '==', teacherName));
+      const snapshot = await getDocs(q);
+
+      let teacherEmail = '';
+      let teacherId = '';
+      let commissionRate = 0.15;
+
+      if (!snapshot.empty) {
+        const teacherDoc = snapshot.docs[0];
+        const teacherData = teacherDoc.data();
+        teacherEmail = teacherData.email || '';
+        teacherId = teacherDoc.id;
+
+        if (teacherId) {
+          const userDocRef = doc(db, 'users', teacherId);
+          const userSnap = await getDoc(userDocRef);
+          if (userSnap.exists()) {
+            const userData = userSnap.data();
+            if (userData.createdAt?.toDate) {
+              const createdAt = userData.createdAt.toDate();
+              const oneYearAgo = new Date();
+              oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+              if (createdAt <= oneYearAgo) {
+                commissionRate = 0.10;
+              }
+            }
+          }
+        }
+      }
+
       await addDoc(collection(db, 'reservations'), {
         teacherName,
         lessonCourse,
@@ -100,11 +153,36 @@ const ReservationForm: React.FC = () => {
         time: selectedTime,
         ...formData,
         createdAt: Timestamp.now(),
+        commissionRate,
       });
+
+      await sendReservationEmail({
+        user_name: formData.name,
+        email: formData.email,
+        lesson_date: `${selectedDate} ${selectedTime}`,
+        teacher_name: teacherName,
+        lesson_location: formData.location,
+        lesson_fee: lessonCourse,
+      });
+
+      if (teacherEmail) {
+        await sendTeacherNotificationEmail({
+          teacher_email: teacherEmail,
+          user_name: formData.name,
+          email: formData.email,
+          phone: formData.phone,
+          lesson_date: `${selectedDate} ${selectedTime}`,
+          lesson_location: formData.location,
+          lesson_fee: lessonCourse,
+          notes: formData.notes,
+        });
+      }
+
+      alert(`✅ 予約完了（手数料率 ${commissionRate * 100}%） 確認メールを送信しました。`);
       setSubmitted(true);
     } catch (error) {
-      console.error('予約の保存に失敗しました:', error);
-      alert('送信に失敗しました。再度お試しください。');
+      console.error('予約またはメール送信に失敗しました:', error);
+      alert('❌ 予約処理またはメールの送信に失敗しました。通信環境をご確認ください。');
     }
   };
 
@@ -136,59 +214,15 @@ const ReservationForm: React.FC = () => {
 
           {selectedDate && selectedTime && (
             <form onSubmit={handleConfirm} style={{ maxWidth: '600px', margin: '2rem auto' }}>
-              <h3>選択された日時：</h3>
-              <p>{selectedDate} {selectedTime}</p>
-
-              <p><strong>講師名：</strong>{teacherName}</p>
-              <p><strong>レッスンコース：</strong>{lessonCourse}</p>
-
               <div className="form-group">
-                <label className="form-label">
-                  お名前<span className="required-label">（必須）</span>
-                </label>
-                <input type="text" name="name" className="form-input" value={formData.name} onChange={handleChange} />
-                {errors.name && <span className="form-error">{errors.name}</span>}
+                <label>レッスン場所</label>
+                <input type="text" name="location" value={formData.location} onChange={handleChange} className="form-control" />
+                {errors.location && <p className="error">{errors.location}</p>}
               </div>
-
               <div className="form-group">
-                <label className="form-label">
-                  ふりがな<span className="required-label">（必須）</span>
-                </label>
-                <input type="text" name="furigana" className="form-input" value={formData.furigana} onChange={handleChange} />
-                {errors.furigana && <span className="form-error">{errors.furigana}</span>}
+                <label>ご要望など</label>
+                <textarea name="notes" value={formData.notes} onChange={handleChange} className="form-control" />
               </div>
-
-              <div className="form-group">
-                <label className="form-label">
-                  メールアドレス<span className="required-label">（必須）</span>
-                </label>
-                <input type="email" name="email" className="form-input" value={formData.email} onChange={handleChange} />
-                {errors.email && <span className="form-error">{errors.email}</span>}
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">
-                  電話番号<span className="required-label">（必須）</span>
-                </label>
-                <input type="tel" name="phone" className="form-input" value={formData.phone} onChange={handleChange} />
-                {errors.phone && <span className="form-error">{errors.phone}</span>}
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">
-                  希望レッスン場所（相談可）<span className="required-label">（必須）</span>
-                </label>
-                <input type="text" name="location" className="form-input" value={formData.location} onChange={handleChange} />
-                {errors.location && <span className="form-error">{errors.location}</span>}
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">
-                  その他のご要望<span className="optional-label">（任意）</span>
-                </label>
-                <textarea name="notes" className="form-textarea" rows={4} value={formData.notes} onChange={handleChange} />
-              </div>
-
               <button type="submit" className="form-button">確認画面へ</button>
             </form>
           )}
