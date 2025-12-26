@@ -5,6 +5,7 @@ import { subjects } from "./data/subjects";
 import ReviewList from "./components/ReviewList";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { tagIconMap } from "./utils/tagIconMap";
+import { useAuth } from "./hooks/useAuth";
 import "./index.css";
 
 const GeidaiConnectUi: React.FC = () => {
@@ -15,13 +16,12 @@ const GeidaiConnectUi: React.FC = () => {
   const [selectedCourse, setSelectedCourse] = useState("");
 
   const navigate = useNavigate();
+  const { user, loading } = useAuth();
 
-  // 都道府県一覧
   const prefectureOptions = Array.from(
     new Set(teachers.map((t) => t.prefecture))
   ).sort();
 
-  // 選択された都道府県に属する市区町村
   const cityOptions = selectedPrefecture
     ? Array.from(
         new Set(
@@ -40,6 +40,23 @@ const GeidaiConnectUi: React.FC = () => {
       teacher.city === selectedCity &&
       (!selectedSubject || teacher.genres.includes(selectedSubject))
   );
+
+  const handleReserveClick = () => {
+  if (!user) {
+    // 👇 ログインしていない場合、リダイレクト先を一時保存
+    sessionStorage.setItem(
+      "redirectAfterLogin",
+      `/reserve?teacher=${encodeURIComponent(selectedTeacher.name)}&course=${encodeURIComponent(selectedCourse)}`
+    );
+    navigate("/login");
+  } else {
+    navigate(
+      `/reserve?teacher=${encodeURIComponent(selectedTeacher.name)}&course=${encodeURIComponent(
+        selectedCourse
+      )}`
+    );
+  }
+};
 
   return (
     <div>
@@ -229,12 +246,9 @@ const GeidaiConnectUi: React.FC = () => {
 
           {selectedCourse && (
             <div style={{ marginTop: "1rem" }}>
-              <a
-                href={`/reserve?teacher=${encodeURIComponent(selectedTeacher.name)}&course=${encodeURIComponent(selectedCourse)}`}
-                className="reserve-button"
-              >
+              <button onClick={handleReserveClick} className="reserve-button">
                 このコースで予約する
-              </a>
+              </button>
             </div>
           )}
 

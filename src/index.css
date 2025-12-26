@@ -21,7 +21,6 @@ h2, h3, h4 {
 /* ▼▼▼ 青いリンクやボタン・アイコンを黒に統一 ▼▼▼ */
 
 a,
-button,
 input,
 select,
 .menu-dropdown a,
@@ -187,31 +186,10 @@ a[href^="mailto"] {
   color: #666;
 }
 
-.teacher-image {
-  width: 100%;
-  max-width: 240px;
-  height: auto;
-  border-radius: 8px;
-}
-
 @media (max-width: 768px) {
-  .teacher-header {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .selectors {
-    flex-direction: column;
-  }
-
-  .footer .footer-links {
-    flex-direction: column;
-    gap: 0.8rem;
-  }
-
-  .teacher-image {
-    max-width: 160px;
-  }
+  .teacher-header { flex-direction: column; align-items: flex-start; }
+  .selectors { flex-direction: column; }
+  .footer .footer-links { flex-direction: column; gap: 0.8rem; }
 }
 
 /* コース表 */
@@ -231,7 +209,7 @@ a[href^="mailto"] {
 
 .course-table td:first-child,
 .course-table th:first-child {
-  width: 60px; /* ✅ 固定幅に制限（調整可） */
+  width: 60px;
   text-align: center;
 }
 
@@ -283,40 +261,17 @@ a[href^="mailto"] {
   margin-bottom: 0.5rem;
 }
 
-/* アニメーション */
-@keyframes fadeInUp {
-  0% {
-    opacity: 0;
-    transform: translateY(30px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* レスポンシブ */
 @media (max-width: 768px) {
-  .teacher-header {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .selectors {
-    flex-direction: column;
-  }
-
-  .footer .footer-links {
-    flex-direction: column;
-    gap: 0.8rem;
-  }
+  .teacher-header { flex-direction: column; align-items: flex-start; }
+  .selectors { flex-direction: column; }
+  .footer .footer-links { flex-direction: column; gap: 0.8rem; }
 }
 
-/* 運営者情報セクション */
+/* 運営者情報セクション（トップページのカードと同じ位置・幅に揃える） */
 .operator-info-section {
   max-width: 960px;
-  margin: 0 auto;
-  padding: 5rem 1.5rem 3rem 1.5rem;
+  margin: 6rem auto 3rem auto;  /* 上に余白を多めに取ってヘッダーとかぶらないように */
+  padding: 4rem 1.5rem;
   background-color: #ffffff;
   border-radius: 12px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
@@ -324,15 +279,7 @@ a[href^="mailto"] {
   text-align: left;
 }
 
-.operator-info-section h2.section-title {
-  font-size: 1.8rem;
-  text-align: center;
-  border-left: none;
-  color: #3a2e1f;
-  margin-top: 4rem;
-  margin-bottom: 1rem;
-}
-
+/* 見出しは .titled-section を使うので、ここでは本文側だけ定義 */
 .operator-content h3 {
   font-size: 1.2rem;
   margin-top: 1.5rem;
@@ -353,21 +300,10 @@ a[href^="mailto"] {
 }
 
 /* ページ全体が画面高に収まるようにする */
-.app-container {
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-}
+.app-container { display: flex; flex-direction: column; min-height: 100vh; }
+.main-content   { flex: 1; }
 
-/* 中央の可変コンテンツ部分 */
-.main-content {
-  flex: 1;
-}
-
-.review-button-wrapper {
-  margin-top: 1.5rem;
-  margin-bottom: 2rem; /* レビュー一覧との間にゆとりを確保 */
-}
+.review-button-wrapper { margin-top: 1.5rem; margin-bottom: 2rem; }
 
 .about-section.enhanced {
   background-color: #f9f7f3;
@@ -393,6 +329,7 @@ a[href^="mailto"] {
   margin-bottom: 1rem;
 }
 
+/* 講師カード */
 .teacher-grid {
   display: flex;
   flex-wrap: wrap;
@@ -413,23 +350,9 @@ a[href^="mailto"] {
   align-items: center;
   transition: transform 0.3s ease;
 }
+.teacher-card:hover { transform: translateY(-4px); }
 
-.teacher-card:hover {
-  transform: translateY(-4px);
-}
-
-.teacher-image {
-  width: 100%;
-  max-width: 240px;
-  height: auto;
-  border-radius: 8px;
-  margin-bottom: 1rem;
-}
-
-.teacher-info {
-  text-align: left;
-  width: 100%;
-}
+.teacher-info { text-align: left; width: 100%; }
 
 .teacher-name {
   font-size: 1.3rem;
@@ -438,11 +361,7 @@ a[href^="mailto"] {
   color: #3a2e1f;
 }
 
-.teacher-furigana {
-  font-size: 0.95rem;
-  color: #666;
-  margin-bottom: 0.5rem;
-}
+.teacher-furigana { font-size: 0.95rem; color: #666; margin-bottom: 0.5rem; }
 
 .teacher-subject,
 .teacher-location,
@@ -451,88 +370,30 @@ a[href^="mailto"] {
   font-size: 0.95rem;
 }
 
-.teacher-courses {
-  margin-top: 1rem;
-  margin-bottom: 1rem;
-}
+.teacher-courses { margin-top: 1rem; margin-bottom: 1rem; }
 
-.teacher-course {
-  font-size: 0.95rem;
-  margin-bottom: 0.4rem;
-}
-
-.teacher-card {
-  display: block !important;
-  margin-top: 2rem;
-  padding: 1rem;
-  border: 1px solid #ccc;
-  background: white;
-  max-width: 600px;
-}
+.teacher-course { font-size: 0.95rem; margin-bottom: 0.4rem; }
 
 .teacher-image {
   width: 100%;
-  max-width: 300px;
+  max-width: 240px;
   height: auto;
-  display: block;
-  margin-bottom: 1rem;
+  border-radius: 8px;
 }
 
-.contact-outer {
-  display: flex;
-  justify-content: center;
-  padding-top: 120px; /* ヘッダーと重ならないように */
-  padding-bottom: 60px;
-}
+/* お問い合わせ */
+.contact-outer { display: flex; justify-content: center; padding-top: 120px; padding-bottom: 60px; }
+.contact-inner { text-align: left; max-width: 500px; width: 90%; }
+.contact-title { text-align: center; margin-bottom: 2rem; font-size: 1.8rem; font-weight: bold; }
+.contact-text-block p { margin: 1rem 0; font-size: 1.1rem; }
+.contact-heading { font-size: 1.8rem; font-weight: bold; color: #3d2b1f; text-align: center; margin-bottom: 2rem; }
+.contact-content { text-align: left; font-size: 1rem; color: #3d2b1f; line-height: 2; max-width: 700px; margin: 0 auto; }
+.contact-content p { margin-bottom: 1.2rem; }
+.contact-link { color: #3d2b1f; text-decoration: underline; }
 
-.contact-inner {
-  text-align: left;
-  max-width: 500px;
-  width: 90%;
-}
-
-.contact-title {
-  text-align: center;
-  margin-bottom: 2rem;
-  font-size: 1.8rem;
-  font-weight: bold;
-}
-
-.contact-text-block p {
-  margin: 1rem 0;
-  font-size: 1.1rem;
-}
-
-
-.contact-heading {
-  font-size: 1.8rem;
-  font-weight: bold;
-  color: #3d2b1f;
-  text-align: center;
-  margin-bottom: 2rem;
-}
-
-.contact-content {
-  text-align: left;
-  font-size: 1rem;
-  color: #3d2b1f;
-  line-height: 2;
-  max-width: 700px;
-  margin: 0 auto;
-}
-
-.contact-content p {
-  margin-bottom: 1.2rem;
-}
-
-.contact-link {
-  color: #3d2b1f;
-  text-decoration: underline;
-}
-
-/* ▼▼▼ contact-section（統一後）▼▼▼ */
+/* 統一後 contact セクション */
 .contact-section {
-  margin-top: 80px; /* ヘッダーとの被り防止 */
+  margin-top: 80px;
   background-color: #fdfaf5;
   border-radius: 12px;
   padding: 3rem;
@@ -541,29 +402,10 @@ a[href^="mailto"] {
   margin-right: auto;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
 }
+.contact-section .section-title { text-align: center; }
 
-.contact-section .section-title {
-  text-align: center;
-}
+.fade-in-up { animation: fadeInUp 0.6s ease-out both; }
 
-/* ▼▼▼ アニメーションクラス定義（不足していた場合）▼▼▼ */
-@keyframes fadeInUp {
-  0% {
-    opacity: 0;
-    transform: translateY(30px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.fade-in-up {
-  animation: fadeInUp 0.6s ease-out both;
-}
-
-
-/* ▼▼▼ お問い合わせタイトルの位置・スタイルを統一 ▼▼▼ */
 .contact-section h2.section-title {
   font-size: 1.8rem;
   text-align: center;
@@ -573,30 +415,12 @@ a[href^="mailto"] {
   margin-bottom: 1rem;
 }
 
+/* teacher-list のヘッダー重なり防止 */
+.teacher-list { padding-top: 120px; scroll-margin-top: 120px; }
 
-/* ▼▼▼ teacher-list のヘッダー重なり防止 ▼▼▼ */
-.teacher-list {
-  padding-top: 120px;
-  scroll-margin-top: 120px;
-}
-
-.teacher-name {
-  font-size: 1.8rem;
-  font-weight: bold;
-  color: #2c2c2c;
-}
-
-.teacher-kana {
-  font-size: 1.2rem;
-  font-weight: 500;
-  color: #555;
-}
-
-.teacher-genre {
-  font-size: 1.2rem;
-  font-style: italic;
-  color: #3a2e1f;
-}
+.teacher-name      { font-size: 1.8rem; font-weight: bold; color: #2c2c2c; }
+.teacher-kana      { font-size: 1.2rem; font-weight: 500; color: #555;     }
+.teacher-genre     { font-size: 1.2rem; font-style: italic; color: #3a2e1f; }
 
 .terms-section-title {
   border-left: 3px solid #c5a46d;
@@ -618,158 +442,54 @@ a[href^="mailto"] {
   padding-left: 0;
 }
 
-.teacher-name-row {
-  display: flex;
-  flex-direction: column; /* タグを下に配置 */
-  gap: 0.2rem;
-  margin-bottom: 0.5rem;
-}
-
-.teacher-tags {
-  display: flex;
-  gap: 0.4rem;
-  flex-wrap: wrap;
-}
+.teacher-name-row { display: flex; flex-direction: column; gap: 0.2rem; margin-bottom: 0.5rem; }
+.teacher-tags     { display: flex; gap: 0.4rem; flex-wrap: wrap; }
 
 .tag {
   display: flex;
   align-items: center;
   font-size: 0.75rem;
   padding: 0.25rem 0.6rem;
-  background-color: #f0f4ff; /* 淡いブルー系背景 */
-  color: #0a3d62; /* 少し濃い青系文字色 */
+  background-color: #f0f4ff;
+  color: #0a3d62;
   border-radius: 12px;
   border: 1px solid #aac4e5;
-  gap: 0.3rem; /* アイコンと文字の間隔 */
+  gap: 0.3rem;
 }
 
-.section-title {
-  text-align: center;
-  font-size: 1.8rem;
-  font-weight: bold;
-  margin-bottom: 2rem;
-}
+.section-title { text-align: center; font-size: 1.8rem; font-weight: bold; margin-bottom: 2rem; }
 
-/* 棒線付き中央見出し */
-.centered-heading-with-border {
-  display: block;
-  text-align: center;
-  margin: 2rem 0;
-}
+.centered-heading-with-border { display: block; text-align: center; margin: 2rem 0; }
+.centered-heading-with-border span { display: inline-block; border-left: 4px solid #b89f6b; padding-left: 1rem; font-size: 1.5rem; font-weight: bold; }
 
-.centered-heading-with-border span {
-  display: inline-block;
-  border-left: 4px solid #b89f6b;
-  padding-left: 1rem;
-  font-size: 1.5rem;
-  font-weight: bold;
-}
+.no-about-section { border-left: none !important; padding-left: 0 !important; }
 
-/* 親のborder-leftを無効化するために任意で使う */
-.no-about-section {
-  border-left: none !important;
-  padding-left: 0 !important;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  margin-bottom: 1.5rem;
-}
-
-.form-label {
-  font-weight: bold;
-  margin-bottom: 0.3rem;
-}
-
-.form-input,
-.form-textarea {
-  padding: 0.5rem;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  font-size: 1rem;
-  width: 100%;
-}
-
-.form-error {
-  color: red;
-  font-size: 0.85rem;
-  margin-top: 0.3rem;
-}
-
+.form-group { display: flex; flex-direction: column; margin-bottom: 1.5rem; }
+.form-label { font-weight: bold; margin-bottom: 0.3rem; }
+.form-input, .form-textarea { padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px; font-size: 1rem; width: 100%; }
+.form-error { color: red; font-size: 0.85rem; margin-top: 0.3rem; }
 .form-button {
-  background-color: #b89f6b;
-  color: white;
-  padding: 0.75rem 1.5rem;
-  font-size: 1rem;
-  font-weight: bold;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
-  transition: background-color 0.3s ease;
+  background-color: #b89f6b; color: white; padding: 0.75rem 1.5rem; font-size: 1rem; font-weight: bold;
+  border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.15); transition: background-color 0.3s ease;
 }
+.form-button:hover { background-color: #a07f4f; }
+.required-label { color: red; font-weight: normal; font-size: 0.9rem; margin-left: 0.3rem; }
+.optional-label { color: #999; font-size: 0.9rem; margin-left: 0.3rem; }
 
-.form-button:hover {
-  background-color: #a07f4f;
-}
-
-.required-label {
-  color: red;
-  font-weight: normal;
-  font-size: 0.9rem;
-  margin-left: 0.3rem;
-}
-
-.optional-label {
-  color: #999;
-  font-size: 0.9rem;
-  margin-left: 0.3rem;
-}
-
+/* セクション見出し（運営者情報など） */
 .titled-section {
   position: relative;
+  display: inline-block;
   padding-left: 1.5rem;
   font-size: 1.5rem;
   font-weight: bold;
   color: #3c2f1e;
-  margin-top: 2rem;
-  margin-bottom: 1rem;
-}
-
-.titled-section::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 4px;
-  height: 100%;
-  background-color: #b89f6b;
-  border-radius: 2px;
-}
-
-/* 上部に余白を追加してヘッダーと重ならないようにする */
-.titled-section-page {
-  padding-top: 2rem;
-}
-
-/* 中央揃え見出し */
-.titled-section {
-  text-align: center;
   margin: 2rem auto 1rem auto;
+  text-align: center;
 }
 
-/* タイトル左に縦棒を表示 */
-.titled-text {
-  position: relative;
-  display: inline-block;
-  padding-left: 1.2rem;
-  font-size: 1.5rem;
-  font-weight: bold;
-  color: #3c2f1e;
-}
-
-.titled-text::before {
+/* 左に1本だけ縦線を描画 */
+.titled-section::before {
   content: "";
   position: absolute;
   left: 0;
@@ -780,3 +500,467 @@ a[href^="mailto"] {
   border-radius: 2px;
 }
 
+/* 運営者情報ページなど、上に少し余白を追加したいときに使う */
+.titled-section-page {
+  padding-top: 80px;
+  padding-bottom: 80px;
+}
+
+
+.right { margin-left: auto; padding-right: 1rem; display: flex; align-items: center; }
+.faq-link { text-decoration: none; font-weight: bold; font-size: 0.95rem; color: #333; padding: 0.5rem; }
+.faq-link:hover { color: #007b5e; }
+.profile-icon { background: none; border: none; cursor: pointer; font-size: 1.3rem; padding: 0.5rem; }
+
+/* Login.tsx 用のスタイル（上端揃え＋左右レイアウト） */
+.login-container {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start; /* 上端揃え */
+  gap: 80px;
+  padding-top: 100px; /* ヘッダーに隠れないように余白 */
+  padding-bottom: 100px;
+  min-height: 100vh;
+  font-family: "Noto Serif JP", serif;
+}
+
+.login-box, .register-box {
+  width: 320px;
+  background-color: #ffffff;
+  padding: 40px;
+  border-radius: 10px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+.login-box h2, .register-box h2 { font-size: 20px; margin-bottom: 20px; color: #333; text-align: center; margin-top: 0; }
+.register-box { margin-top: 0; } /* 右カードの“頭ズレ”防止 */
+
+.login-form label { display: block; margin-top: 12px; margin-bottom: 4px; color: #444; font-size: 14px; }
+.login-form input { width: 100%; padding: 10px; border: 1px solid #aaa; border-radius: 4px; font-size: 14px; }
+
+.login-button, .register-button {
+  margin-top: 20px; width: 100%; padding: 12px; background-color: #b89f6b; color: white; border: none; border-radius: 5px; font-size: 15px; cursor: pointer; transition: background-color 0.3s;
+}
+.login-button:hover, .register-button:hover { background-color: #a78a56; } /* 反応を明確に */
+
+.forgot-password { margin-top: 16px; text-align: center; color: #376672; cursor: pointer; font-size: 13px; text-decoration: underline; }
+.error-message { margin-top: 10px; color: red; font-size: 13px; text-align: center; }
+
+.register-box p { font-size: 14px; line-height: 1.6; text-align: center; color: #555; }
+
+/* チェックボックス行を1行に固定 */
+.checkbox-container { margin-top: 16px; display: flex; align-items: center; justify-content: flex-start; }
+.checkbox-label { font-size: 14px; color: #444; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+
+/* Register.tsx 用ボックス（共通化） */
+.register-container { display: grid; place-items: center; min-height: calc(100dvh - 80px); padding: 24px; }
+.register-box { width: 100%; max-width: 460px; background: #fff; border: 1px solid #eee; border-radius: 12px; padding: 24px; box-shadow: 0 4px 14px rgba(0,0,0,0.04); }
+.register-form { display: grid; gap: 12px; }
+.register-button { height: 44px; border-radius: 8px; background: #b79b64; color: #fff; border: none; cursor: pointer; }
+.register-button:disabled { opacity: .6; cursor: default; }
+.success-message { color: #2e7d32; margin-top: 8px; }
+.already-account { margin-top: 12px; font-size: 0.9rem; }
+
+.login-button:focus-visible,
+.register-button:focus-visible {
+  outline: 3px solid rgba(184,159,107,.45);
+  outline-offset: 2px;
+}
+
+/* アニメーション（完全定義を1つだけ残す） */
+.fade-in-up { animation: fadeInUp 0.6s ease-out both; }
+
+@keyframes fadeInUp {
+  0% {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ===== Register form layout (image-like) ===== */
+.form-grid{ display:grid; grid-template-columns: 180px 1fr; gap: 12px 16px; }
+.form-grid > label{ align-self:center; color:#333; }
+
+.form-grid .split-2{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.form-grid .split-3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+.form-grid .row-2{ grid-column: 1 / -1; }
+
+/* 郵便番号の 〒 + 入力 */
+.form-grid .postal-row{ display:grid; grid-template-columns: 60px 1fr; gap:8px; align-items:center; }
+.form-grid .postal-row .mark{ color:#666; }
+
+/* 入力・セレクト共通 */
+.form-grid input,
+.form-grid select{
+  height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #d6d6d6;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 14px;
+  font-family: "Noto Serif JP", serif;
+}
+.form-grid input::placeholder{ color:#b8b8b8; }
+.form-grid select{ appearance: auto; }
+
+/* 必須アスタリスク */
+.req{ color:#e15858; margin-left:4px; }
+
+/* チェックボックスを1行で */
+.checkbox-label{ display:inline-flex; align-items:center; gap:8px; white-space:nowrap; color:#444; }
+
+/* ボタン */
+.register-button{ height: 44px; border-radius: 8px; background:#b79b64; color:#fff; border:none; cursor:pointer; }
+.register-button:hover{ background:#a78a56; }
+
+/* === Geidai Connect: Register page tweaks === */
+
+/* ヘッダーと重ならないようにページ上部に余白を確保 */
+.register-page,
+.register-container {
+  padding-top: 120px;        /* 他ページと同等の上余白 */
+  padding-bottom: 80px;
+  min-height: 100vh;
+  scroll-margin-top: 120px;  /* アンカー/スクロール時の被り防止 */
+}
+
+/* すべてのコントロールを都道府県行と同じ高さに統一 */
+.form-grid input,
+.form-grid select {
+  height: 48px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid #d6d6d6;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 14px;
+  font-family: "Noto Serif JP", serif;
+  line-height: 1.2;
+}
+
+/* プレースホルダーは薄め */
+.form-grid input::placeholder { color: #b8b8b8; }
+.form-grid select { appearance: auto; }
+
+/* 郵便番号行：〒は小さく、入力欄は都道府県と同じ高さ・幅感に */
+.form-grid .postal-row {
+  display: grid;
+  grid-template-columns: 36px 1fr;  /* マーク + フル幅入力 */
+  gap: 8px;
+  align-items: center;
+}
+.form-grid .postal-row .mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 48px;              /* 入力と同じ高さ */
+  line-height: 48px;
+  color: #666;
+  border: 1px solid transparent; /* 高さ合わせのみで枠は非表示 */
+}
+
+/* 2列/3列行の各入力もフル幅で揃える */
+.form-grid .split-2 > *,
+.form-grid .split-3 > * {
+  width: 100%;
+}
+
+/* 細かな見た目の統一 */
+.register-button { height: 48px; }   /* ボタン高さも統一 */
+.checkbox-label { white-space: nowrap; display: inline-flex; align-items: center; gap: 8px; }
+
+/* Registerボタンを半幅に（フォーム横幅の50%） */
+.form-grid .row-2 .register-button {
+  width: 20%;
+  min-width: 100px;         /* 画面が狭い時の下限（お好みで調整） */
+  margin-inline: auto;      /* 中央寄せ。左寄せにしたい場合はこの行を削除 */
+}
+
+/* --- Registerページだけ左余白を少なくする（ラベルを左に寄せる） --- */
+.register-page .register-box {
+  padding-left: 12px;   /* 既存: 40px → 左に寄ります */
+  padding-right: 16px;
+}
+
+/* --- ラベル列を広げて折り返しにくくする + 住所2を1行固定 --- */
+.form-grid{
+  /* 既存: grid-template-columns: 180px 1fr; */
+  grid-template-columns: minmax(220px, max-content) 1fr; /* ラベル列を広げ、内容に応じて拡張 */
+}
+
+/* ラベルは左寄せ（念のため） */
+.form-grid > label{
+  justify-self: start;
+}
+
+/* 長いラベルを1行に固定（nowrapクラスを付けたラベルに適用） */
+.form-grid > label.nowrap{
+  white-space: nowrap;
+}
+
+/* スマホ等の狭幅時は縦積みに戻す（任意） */
+@media (max-width: 640px){
+  .form-grid{ grid-template-columns: 1fr; }
+  .register-page .register-box{ padding-left: 16px; padding-right: 16px; }
+}
+
+/* ===== Register レイアウトの最終上書き（確実に効かせる）===== */
+
+/* 1) カード幅を拡げて、ラベル列を左へ見せる */
+.register-page .register-box{
+  max-width: 840px !important;   /* 既存: 460px → 840px に拡大 */
+  padding-left: 16px !important; /* 余白を詰めてより左寄せに */
+  padding-right: 20px !important;
+}
+
+/* 2) ラベル列の幅をしっかり確保（左カラム） */
+.register-page .form-grid{
+  grid-template-columns: 260px 1fr !important;  /* 180→260px */
+  gap: 12px 16px !important;
+}
+
+/* 3) ラベルは左寄せ・改行させない（住所2など） */
+.register-page .form-grid > label{ 
+  justify-self: start !important;
+}
+.register-page .form-grid > label.nowrap{
+  white-space: nowrap !important;
+}
+
+/* 4) 入力の高さ統一（都道府県と同じ） */
+.register-page .form-grid input,
+.register-page .form-grid select{
+  height: 48px !important;
+}
+
+/* 5) 郵便番号行の調整（〒 + 入力） */
+.register-page .form-grid .postal-row{
+  grid-template-columns: 36px 1fr !important;
+}
+.register-page .form-grid .postal-row .mark{
+  height: 48px !important;
+  line-height: 48px !important;
+}
+
+/* ===== Register：右を狭く・左ラベルを広く ===== */
+
+/* カードを少しだけ広げて余裕を作る（必要に応じて調整） */
+.register-page .register-box{
+  max-width: 900px !important;  /* 840→900px */
+}
+
+/* 左＝ラベル列を広げる / 右＝入力列を控えめに */
+.register-page .form-grid{
+  /* 左 320px / 右は 360〜520px に収まる可変幅 */
+  grid-template-columns: 320px minmax(360px, 520px) !important;
+  gap: 10px 16px !important;
+}
+
+/* 入力UIの最大幅を右カラム内で固定（右だけ細く見せる） */
+.register-page .form-grid input,
+.register-page .form-grid select{
+  max-width: 520px !important;  /* 右カラムの上限と合わせる */
+  height: 48px !important;      /* 統一高さ */
+}
+
+/* 郵便番号行（〒 + 入力）も右幅に合わせる */
+.register-page .form-grid .postal-row{
+  grid-template-columns: 36px 1fr !important;
+}
+.register-page .form-grid .postal-row .mark{
+  height: 48px !important;
+  line-height: 48px !important;
+}
+
+/* ラベルは左寄せ。長いラベル（住所2など）を1行にする場合は .nowrap を利用 */
+.register-page .form-grid > label{ justify-self: start !important; }
+.register-page .form-grid > label.nowrap{ white-space: nowrap !important; }
+
+.register-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: grayscale(10%);
+}
+
+/* 「登録」文字が消える問題の強制修正 */
+.register-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: #fff !important;              /* 文字色を強制的に白に */
+  font-weight: 700;                    /* 視認性UP（任意） */
+  line-height: 1;                      /* 高さ48pxでも中央に綺麗に出す */
+  text-indent: 0 !important;           /* 万が一のずれ対策 */
+}
+
+.register-button:disabled {
+  color: rgba(255,255,255,0.9) !important;  /* 非活性時も読める白 */
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: grayscale(10%);
+}
+
+/* 登録ボタンの文字色を常に白で固定（全ステート） */
+.register-button,
+.register-button:link,
+.register-button:visited,
+.register-button:hover,
+.register-button:active,
+.register-button:focus {
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important; /* 念のため */
+  background-color: #b79b64 !important;      /* 背景も明示 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  line-height: 1;
+}
+.register-button:disabled {
+  color: rgba(255,255,255,0.9) !important;
+  opacity: .55;
+  cursor: not-allowed;
+  filter: grayscale(10%);
+}
+
+/* ==== REGISTER BUTTON 最終上書き（全ステートで文字を表示） ==== */
+.register-button,
+.register-button:link,
+.register-button:visited,
+.register-button:hover,
+.register-button:active,
+.register-button:focus {
+  background-color: #b79b64 !important;  /* 金色 */
+  color: #fff !important;                 /* 文字を白で固定 */
+  -webkit-text-fill-color: #fff !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 16px !important;
+  font-weight: 700 !important;
+  line-height: 1 !important;
+  letter-spacing: .02em;
+  text-indent: 0 !important;
+  mix-blend-mode: normal !important;      /* 合成の影響を無効化 */
+  text-shadow: 0 0 0 rgba(0,0,0,0.01);    /* WebKit の描画不具合ケア */
+}
+
+.register-button:hover {
+  background-color: #a78a56 !important;
+}
+
+/* disabled でも文字が薄くならないよう固定 */
+.register-button:disabled {
+  background-color: #b79b64 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  opacity: 1 !important;   /* 透明化を無効化 */
+  filter: none !important; /* グレースケール等を無効化 */
+  cursor: not-allowed !important;
+}
+
+/* 念のため、ボタン内テキストを直接着色（②の span 用） */
+.register-button .btn-text {
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+  position: relative;
+  z-index: 1;
+}
+
+/* ===== フォント統一：Noto Serif JP を全体適用 ===== */
+html, body {
+  font-family: "Noto Serif JP", serif;
+}
+
+/* フォームやボタンも継承（ブラウザ既定の sans に戻らないように） */
+button, input, select, textarea {
+  font-family: inherit;
+}
+
+/* 見出しも統一（お好みで太さ調整） */
+h1, h2, h3 {
+  font-family: inherit;
+  font-weight: 600;
+}
+
+/* 「すでにアカウントをお持ちの方は こちら」のリンク強調 */
+.login-link {
+  color: #b79b64;             /* ボタンと同系色 */
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.login-link:hover {
+  opacity: 0.8;
+}
+
+/* ログインページのボタン幅を統一 */
+.login-container .login-button,
+.login-container .register-box .register-button {
+  width: 220px;        /* ログインボタンと同じくらいの幅（お好みで調整） */
+  max-width: 100%;
+  display: inline-block;
+}
+
+/* ログインと「会員登録がまだの方」カードの縦位置を揃える */
+.login-container {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;  /* 上端を揃える */
+  gap: 64px;                /* カード間の横スペース（お好みで） */
+}
+
+/* 両カードの上マージンを揃える（差がある場合の上書き） */
+.login-container .login-box,
+.login-container .register-box {
+  margin-top: 0;
+}
+/* 右側カード内の要素を縦並び＆中央寄せ */
+.login-container .register-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;  /* 見出し・本文・ボタンのX位置を揃える */
+  text-align: center;  /* テキストも中央揃え */
+}
+
+/* ボタンは中央に配置（幅はログインと同じ想定） */
+.login-container .register-box .register-button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  margin-top: 16px;     /* 見出し/説明文との間隔。お好みで調整 */
+}
+/* ログイン＆新規会員登録カードの縦位置をそろえる */
+.login-container {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;   /* 上揃え */
+  gap: 64px;                 /* カード間の横スペース（お好みで） */
+}
+
+/* ログイン＆新規会員登録カードの縦位置（最終調整） */
+.login-container .login-box {
+  margin-top: 40px !important;   /* 左カード */
+}
+
+.login-container .register-box {
+  margin-top: 56px !important;   /* 右カードを少しだけ下げる */
+}
+
+/* 運営者情報ページのコンテンツ幅をトップページと揃える */
+.about-container {
+  max-width: 960px;        /* トップページと同じくらいの幅に */
+  margin: 0 auto;          /* 画面中央に配置 */
+  padding: 80px 24px 120px;
+}
+
+/* 運営者情報のカード */
+.about-card {
+  width: 100%;
+  margin: 0 auto;
+}
