@@ -1,10 +1,12 @@
 // src/firebase.ts
-import { initializeApp, getApps, type FirebaseOptions } from "firebase/app";
-import { getAuth, setPersistence, browserLocalPersistence } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { initializeApp, getApps, getApp } from "firebase/app";
+import { getAuth /*, connectAuthEmulator */ } from "firebase/auth";
+import { getFirestore /*, connectFirestoreEmulator */ } from "firebase/firestore";
+import { getStorage /*, connectStorageEmulator */ } from "firebase/storage";
+import { getFunctions } from "firebase/functions";
 
-// .env から読み込む（Viteは VITE_ プレフィクス必須）
-const firebaseConfig: FirebaseOptions = {
+// Vite 環境変数（.env / .env.local などに設定）
+const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
@@ -13,16 +15,23 @@ const firebaseConfig: FirebaseOptions = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
-// HMR対策：既存インスタンスを再利用
-const app = getApps().length ? getApps()[0]! : initializeApp(firebaseConfig);
+// 既存アプリがあれば再利用
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-// Export（Register.tsx などから利用）
+// 各サービス
 export const auth = getAuth(app);
-export const db   = getFirestore(app);
+export const db = getFirestore(app);
+export const storage = getStorage(app);
 
-// 任意：ログイン状態をローカルに永続化（再読み込みや再訪問に強い）
-setPersistence(auth, browserLocalPersistence).catch(() => {
-  // Safariプライベート等で失敗することがあるため握りつぶし
-});
+// ★ Cloud Functions のリージョンはデプロイに合わせて us-central1
+export const functions = getFunctions(app, "us-central1");
+
+// （任意）ローカル開発でエミュレータを使う場合は下を有効化
+if (import.meta.env.DEV && location.hostname === "localhost") {
+  // connectAuthEmulator(auth, "http://127.0.0.1:9099");
+  // connectFirestoreEmulator(db, "127.0.0.1", 8080);
+  // connectStorageEmulator(storage, "127.0.0.1", 9199);
+  // connectFunctionsEmulator(functions, "127.0.0.1", 5001);
+}
 
 export default app;

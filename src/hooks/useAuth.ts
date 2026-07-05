@@ -1,19 +1,24 @@
-import { useEffect, useState } from "react";
-import { getAuth, onAuthStateChanged, User } from "firebase/auth";
+import {
+  createUserWithEmailAndPassword,
+  updateProfile,
+} from "firebase/auth";
+import { auth } from "../firebase";
 
-export const useAuth = () => {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+export async function signUpWithEmail(
+  email: string,
+  password: string,
+  displayName?: string
+) {
+  // 1) サインアップ
+  const cred = await createUserWithEmailAndPassword(auth, email, password);
 
-  useEffect(() => {
-    const auth = getAuth();
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
-      setLoading(false);
-    });
+  // 2) 表示名が渡されたら更新
+  if (displayName) {
+    await updateProfile(cred.user, { displayName });
+  }
 
-    return () => unsubscribe();
-  }, []);
+  // 3) 検証メールは Functions の onCreate で自動送信されるため、
+  //    フロントから sendVerifyEmail は呼ばない
 
-  return { user, loading };
-};
+  return cred.user;
+}

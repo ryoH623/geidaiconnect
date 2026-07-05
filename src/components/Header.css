@@ -85,6 +85,19 @@
   margin: 0.75rem 0;
 }
 
+/* ログアウトはボタンだが、メニュー内リンクと同じ見た目に揃える */
+.menu-dropdown .menu-logout-button {
+  display: block;
+  margin: 0.75rem 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #333;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 .search-buttons {
   margin-top: 0.5rem;
   display: flex;

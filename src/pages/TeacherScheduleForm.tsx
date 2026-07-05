@@ -1,11 +1,8 @@
 import React, { useState } from "react";
-import { db } from "../firebase";
+import { db, auth } from "../firebase";
 import { addDoc, collection } from "firebase/firestore";
-import { useAuth } from "../hooks/useAuth";
 
 const TeacherScheduleForm: React.FC = () => {
-  const { user } = useAuth();
-
   const [date, setDate] = useState("");
   const [timeSlots, setTimeSlots] = useState<string[]>([]);
   const [location, setLocation] = useState("自宅");
@@ -27,6 +24,9 @@ const TeacherScheduleForm: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const user = auth.currentUser;
+
     if (!user) {
       alert("ログインしてください。");
       return;
@@ -39,8 +39,9 @@ const TeacherScheduleForm: React.FC = () => {
         timeSlots,
         location,
         note,
-        createdAt: new Date()
+        createdAt: new Date(),
       });
+
       alert("スケジュールを登録しました！");
       setDate("");
       setTimeSlots([]);

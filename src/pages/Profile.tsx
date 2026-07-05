@@ -1,20 +1,20 @@
-import React, { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+// src/pages/Profile.tsx
+// 会員情報の閲覧・編集ページ。users/{uid} の内容を表示し、その場で更新できる。
+// メールアドレス（Auth）と role は変更不可。
+import React, { useEffect, useMemo, useState } from "react";
+import { updateProfile } from "firebase/auth";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "../firebase";
+import { useAuth } from "../contexts/AuthContext";
+import { prefectures } from "../data/prefectures";
 
 type Gender = "" | "male" | "female" | "other";
 
-const Register: React.FC = () => {
-  const navigate = useNavigate();
+const Profile: React.FC = () => {
+  const { user } = useAuth();
 
-  // 基本
+  // 基本情報
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-
-  // 拡張項目
   const [lastName, setLastName] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastNameKana, setLastNameKana] = useState("");
@@ -29,24 +29,13 @@ const Register: React.FC = () => {
   const [birthM, setBirthM] = useState("");
   const [birthD, setBirthD] = useState("");
 
-  // 規約同意
-  const [agree, setAgree] = useState(false);
-
   // 状態
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // 郵便番号検索のローディング
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
   const [isSearchingZip, setIsSearchingZip] = useState(false);
-
-  const prefectures = [
-    "北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県",
-    "新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県",
-    "滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県",
-    "鳥取県","島根県","岡山県","広島県","山口県",
-    "徳島県","香川県","愛媛県","高知県",
-    "福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"
-  ];
 
   const years = useMemo(() => {
     const arr: string[] = [];
@@ -56,6 +45,47 @@ const Register: React.FC = () => {
   }, []);
   const months = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"));
   const days = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0"));
+
+  useEffect(() => {
+    if (!user) return;
+
+    const fetchProfile = async () => {
+      try {
+        setLoading(true);
+        setLoadError(null);
+
+        const snap = await getDoc(doc(db, "users", user.uid));
+
+        if (!snap.exists()) {
+          setLoadError("会員情報が見つかりませんでした。");
+          return;
+        }
+
+        const d = snap.data();
+        setEmail(typeof d.email === "string" ? d.email : user.email || "");
+        setLastName(typeof d.lastName === "string" ? d.lastName : "");
+        setFirstName(typeof d.firstName === "string" ? d.firstName : "");
+        setLastNameKana(typeof d.lastNameKana === "string" ? d.lastNameKana : "");
+        setFirstNameKana(typeof d.firstNameKana === "string" ? d.firstNameKana : "");
+        setPostalCode(typeof d.postalCode === "string" ? d.postalCode : "");
+        setPrefecture(typeof d.prefecture === "string" ? d.prefecture : "");
+        setAddress1(typeof d.address1 === "string" ? d.address1 : "");
+        setAddress2(typeof d.address2 === "string" ? d.address2 : "");
+        setPhone(typeof d.phone === "string" ? d.phone : "");
+        setGender((d.gender as Gender) || "");
+        setBirthY(d.birthday?.year ?? "");
+        setBirthM(d.birthday?.month ?? "");
+        setBirthD(d.birthday?.day ?? "");
+      } catch (err) {
+        console.error("会員情報の取得に失敗しました:", err);
+        setLoadError("会員情報の取得に失敗しました。時間をおいて再度お試しください。");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProfile();
+  }, [user]);
 
   const handlePostalBlur = async () => {
     if (postalCode.length !== 7) return;
@@ -79,52 +109,29 @@ const Register: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
+    setSaveError(null);
+    setSaved(false);
+
+    if (!user) return;
 
     if (
       !lastName || !firstName || !lastNameKana || !firstNameKana ||
       !prefecture || !address1 || !phone || !gender ||
-      !birthY || !birthM || !birthD || !email
+      !birthY || !birthM || !birthD
     ) {
-      setError("必須項目（*）を入力してください。");
-      return;
-    }
-
-    if (password !== confirm) {
-      setError("パスワードが一致しません。");
-      return;
-    }
-
-    if (password.length < 8) {
-      setError("パスワードは8文字以上にしてください。");
-      return;
-    }
-
-    if (!agree) {
-      setError("利用規約への同意が必要です。");
+      setSaveError("必須項目（*）を入力してください。");
       return;
     }
 
     try {
-      setSubmitting(true);
+      setSaving(true);
 
-      // 1) Auth で作成
-      const cred = await createUserWithEmailAndPassword(auth, email, password);
-
-      // 2) 表示名
       const displayName = `${lastName}${firstName}`.trim();
-      if (displayName) {
-        await updateProfile(cred.user, { displayName });
-      }
 
-      // 3) Firestore にプロフィール保存
-      const userRef = doc(db, "users", cred.user.uid);
+      // role / email / uid / createdAt は書き換えない
       await setDoc(
-        userRef,
+        doc(db, "users", user.uid),
         {
-          uid: cred.user.uid,
-          role: "student",
-          email,
           displayName: displayName || null,
           lastName,
           firstName,
@@ -136,50 +143,57 @@ const Register: React.FC = () => {
           address2: address2 || null,
           phone: phone || null,
           gender: gender || null,
-          birthday: birthY && birthM && birthD
-            ? { year: birthY, month: birthM, day: birthD }
-            : null,
-          createdAt: serverTimestamp(),
+          birthday: { year: birthY, month: birthM, day: birthD },
           updatedAt: serverTimestamp(),
-          emailVerified: false,
         },
         { merge: true }
       );
 
-      // 4) 検証メールは Functions の onCreate で自動送信されるため、
-      //    フロントから sendVerifyEmail は呼ばない
-
-      setError(null);
-
-      // メール確認案内ページへ遷移（再送用にメールアドレスを渡す）
-      navigate("/verify-email", { state: { email } });
-    } catch (err: any) {
-      console.error("[register] failed:", err?.code, err?.message, err);
-      const code = err?.code || "";
-
-      if (code === "auth/email-already-in-use") {
-        setError("このメールアドレスは既に登録されています。");
-      } else if (code === "auth/invalid-email") {
-        setError("メールアドレスの形式が正しくありません。");
-      } else if (code === "auth/weak-password") {
-        setError("パスワードが弱すぎます。（8文字以上、英数字を含めてください）");
-      } else if (code === "auth/too-many-requests") {
-        setError("リクエストが多すぎます。しばらく待ってから再度お試しください。");
-      } else {
-        setError("登録に失敗しました。入力内容をご確認のうえ再度お試しください。");
+      if (auth.currentUser && displayName) {
+        await updateProfile(auth.currentUser, { displayName });
       }
+
+      setSaved(true);
+    } catch (err) {
+      console.error("会員情報の更新に失敗しました:", err);
+      setSaveError("会員情報の更新に失敗しました。時間をおいて再度お試しください。");
     } finally {
-      setSubmitting(false);
+      setSaving(false);
     }
   };
+
+  if (loading) {
+    return (
+      <div className="register-container register-page">
+        <div className="register-box">
+          <h2>会員情報</h2>
+          <p>読み込み中...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="register-container register-page">
+        <div className="register-box">
+          <h2>会員情報</h2>
+          <p className="error-message" role="alert">{loadError}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="register-container register-page">
       <div className="register-box">
-        <h2>新規会員登録</h2>
+        <h2>会員情報</h2>
         <p className="required-note"><span className="req">*</span>は入力必須項目です。</p>
 
         <form onSubmit={handleSubmit} className="register-form form-grid">
+          <label>メールアドレス</label>
+          <input type="email" value={email} disabled />
+
           <label>お名前<span className="req">*</span></label>
           <div className="split-2">
             <input placeholder="姓" value={lastName} onChange={e => setLastName(e.target.value)} required />
@@ -213,7 +227,9 @@ const Register: React.FC = () => {
           <label>都道府県<span className="req">*</span></label>
           <select value={prefecture} onChange={e => setPrefecture(e.target.value)} required>
             <option value="">選択してください</option>
-            {prefectures.map((p) => <option key={p} value={p}>{p}</option>)}
+            {prefectures.map((p) => (
+              <option key={p.code} value={p.name}>{p.name}</option>
+            ))}
           </select>
 
           <label>住所1（市部区／町・村）<span className="req">*</span></label>
@@ -237,15 +253,6 @@ const Register: React.FC = () => {
             value={phone}
             onChange={e => setPhone(e.target.value.replace(/[^0-9]/g, ""))}
             inputMode="numeric"
-            required
-          />
-
-          <label>メールアドレス<span className="req">*</span></label>
-          <input
-            type="email"
-            placeholder="例）○○○@example.com"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
             required
           />
 
@@ -273,55 +280,20 @@ const Register: React.FC = () => {
             </select>
           </div>
 
-          <label>パスワード<span className="req">*</span></label>
-          <input
-            type="password"
-            placeholder="半角英数字8文字以上"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            required
-          />
-
-          <label>確認用パスワード<span className="req">*</span></label>
-          <input
-            type="password"
-            value={confirm}
-            onChange={e => setConfirm(e.target.value)}
-            required
-          />
-
-          <div className="row-2">
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={agree}
-                onChange={e => setAgree(e.target.checked)}
-              />
-              <span>
-                <a href="/terms" target="_blank" rel="noopener noreferrer" className="login-link">
-                  利用規約
-                </a>
-                に同意して申込みます。未成年者については法定代理人の同意を得ていることを確認します。
-              </span>
-            </label>
-          </div>
-
           <div className="row-2">
             <button
               type="submit"
               className="register-button"
-              disabled={!agree || submitting}
-              aria-disabled={!agree || submitting}
+              disabled={saving}
+              aria-disabled={saving}
             >
-              <span className="btn-text">{submitting ? "登録中…" : "会員登録"}</span>
+              <span className="btn-text">{saving ? "保存中…" : "変更を保存"}</span>
             </button>
 
-            {error && <p className="error-message" role="alert">{error}</p>}
-
-            <div className="already-account" style={{ marginTop: 12 }}>
-              すでにアカウントをお持ちの方は{" "}
-              <a href="/login" className="login-link">こちら</a>
-            </div>
+            {saveError && <p className="error-message" role="alert">{saveError}</p>}
+            {saved && (
+              <p className="success-message">会員情報を更新しました。</p>
+            )}
           </div>
         </form>
       </div>
@@ -329,4 +301,4 @@ const Register: React.FC = () => {
   );
 };
 
-export default Register;
+export default Profile;

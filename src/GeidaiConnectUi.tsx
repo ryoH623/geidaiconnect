@@ -1,26 +1,27 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { teachers } from "./data/teachers";
+import { teachers, LessonCourse, Teacher } from "./data/teachers";
 import { subjects } from "./data/subjects";
 import ReviewList from "./components/ReviewList";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { tagIconMap } from "./utils/tagIconMap";
-import { useAuth } from "./hooks/useAuth";
+import { useAuth } from "./contexts/AuthContext";
 import "./index.css";
 
 const GeidaiConnectUi: React.FC = () => {
   const [selectedPrefecture, setSelectedPrefecture] = useState("");
   const [selectedCity, setSelectedCity] = useState("");
   const [selectedSubject, setSelectedSubject] = useState("");
-  const [selectedTeacher, setSelectedTeacher] = useState<any>(null);
-  const [selectedCourse, setSelectedCourse] = useState("");
+  const [selectedTeacher, setSelectedTeacher] = useState<Teacher | null>(null);
+  const [selectedCourse, setSelectedCourse] = useState<LessonCourse | null>(null);
 
   const navigate = useNavigate();
-  const { user, loading } = useAuth();
+  const { user } = useAuth();
 
-  const prefectureOptions = Array.from(
-    new Set(teachers.map((t) => t.prefecture))
-  ).sort();
+  const prefectureOptions = useMemo(
+    () => Array.from(new Set(teachers.map((t) => t.prefecture))).sort(),
+    []
+  );
 
   const cityOptions = selectedPrefecture
     ? Array.from(
@@ -32,7 +33,7 @@ const GeidaiConnectUi: React.FC = () => {
       ).sort()
     : [];
 
-  const showTeachers = selectedPrefecture && selectedCity;
+  const showTeachers = !!selectedPrefecture && !!selectedCity;
 
   const filteredTeachers = teachers.filter(
     (teacher) =>
@@ -41,22 +42,49 @@ const GeidaiConnectUi: React.FC = () => {
       (!selectedSubject || teacher.genres.includes(selectedSubject))
   );
 
+  const buildReserveUrl = (teacher: Teacher, course: LessonCourse) => {
+    const params = new URLSearchParams({
+      teacherId: teacher.authUid,
+      teacher: teacher.name,
+      course: course.title,
+      price: course.price,
+      lessonType: course.type,
+    });
+
+    if (course.locationDisplay) {
+      params.set("locationDisplay", course.locationDisplay);
+    }
+
+    if (course.note) {
+      params.set("note", course.note);
+    }
+
+    return `/reserve?${params.toString()}`;
+  };
+
   const handleReserveClick = () => {
-  if (!user) {
-    // 👇 ログインしていない場合、リダイレクト先を一時保存
-    sessionStorage.setItem(
-      "redirectAfterLogin",
-      `/reserve?teacher=${encodeURIComponent(selectedTeacher.name)}&course=${encodeURIComponent(selectedCourse)}`
-    );
-    navigate("/login");
-  } else {
-    navigate(
-      `/reserve?teacher=${encodeURIComponent(selectedTeacher.name)}&course=${encodeURIComponent(
-        selectedCourse
-      )}`
-    );
-  }
-};
+    if (!selectedTeacher || !selectedCourse) return;
+
+    if (!selectedTeacher.authUid) {
+      alert("この講師のログインID連携が未設定です。");
+      return;
+    }
+
+    const reserveUrl = buildReserveUrl(selectedTeacher, selectedCourse);
+
+    if (!user) {
+      sessionStorage.setItem("redirectAfterLogin", reserveUrl);
+      navigate("/login");
+      return;
+    }
+
+    navigate(reserveUrl);
+  };
+
+  const handleTeacherSelect = (teacher: Teacher) => {
+    setSelectedTeacher(teacher);
+    setSelectedCourse(null);
+  };
 
   return (
     <div>
@@ -89,7 +117,9 @@ const GeidaiConnectUi: React.FC = () => {
 
       <section className="search-section fade-in-up">
         <h3>講師を検索する</h3>
-        <p>レッスンを受けたい「地域」と「ジャンル」を選ぶと、該当する講師が表示されます。</p>
+        <p>
+          レッスンを受けたい「地域」と「ジャンル」を選ぶと、該当する講師が表示されます。
+        </p>
 
         <div className="selectors">
           <select
@@ -97,7 +127,9 @@ const GeidaiConnectUi: React.FC = () => {
             onChange={(e) => {
               setSelectedPrefecture(e.target.value);
               setSelectedCity("");
+              setSelectedSubject("");
               setSelectedTeacher(null);
+              setSelectedCourse(null);
             }}
           >
             <option value="">都道府県を選択</option>
@@ -114,6 +146,7 @@ const GeidaiConnectUi: React.FC = () => {
               onChange={(e) => {
                 setSelectedCity(e.target.value);
                 setSelectedTeacher(null);
+                setSelectedCourse(null);
               }}
             >
               <option value="">市区町村を選択</option>
@@ -131,6 +164,7 @@ const GeidaiConnectUi: React.FC = () => {
               onChange={(e) => {
                 setSelectedSubject(e.target.value);
                 setSelectedTeacher(null);
+                setSelectedCourse(null);
               }}
             >
               <option value="">ジャンルを選択（任意）</option>
@@ -150,7 +184,7 @@ const GeidaiConnectUi: React.FC = () => {
               <button
                 key={teacher.name}
                 className="teacher-button"
-                onClick={() => setSelectedTeacher(teacher)}
+                onClick={() => handleTeacherSelect(teacher)}
               >
                 {teacher.name}（{teacher.genres.join("、")}）
               </button>
@@ -166,6 +200,7 @@ const GeidaiConnectUi: React.FC = () => {
               <div className="teacher-name-row">
                 <h2 className="teacher-name">{selectedTeacher.name}</h2>
                 <span className="teacher-kana">{selectedTeacher.furigana}</span>
+
                 <div className="teacher-tags">
                   {selectedTeacher.tags?.map((tag: string, index: number) => (
                     <span key={index} className="tag">
@@ -180,8 +215,12 @@ const GeidaiConnectUi: React.FC = () => {
                   ))}
                 </div>
               </div>
-              <p className="teacher-genre">{selectedTeacher.genres.join("、")}</p>
+
+              <p className="teacher-genre">
+                {selectedTeacher.genres.join("、")}
+              </p>
             </div>
+
             {selectedTeacher.photo && (
               <img
                 src={selectedTeacher.photo}
@@ -214,28 +253,31 @@ const GeidaiConnectUi: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {selectedTeacher.courses.map((c: any, i: number) => (
+                    {selectedTeacher.courses.map((course, i) => (
                       <tr key={i}>
                         <td>
                           <input
                             type="radio"
                             name="course"
-                            value={c.title}
-                            checked={selectedCourse === c.title}
-                            onChange={(e) => setSelectedCourse(e.target.value)}
+                            value={course.title}
+                            checked={selectedCourse?.title === course.title}
+                            onChange={() => setSelectedCourse(course)}
                           />
                         </td>
                         <td>
-                          {c.title}
-                          {c.type === "自宅" && c.locationDisplay && (
+                          {course.title}
+                          {course.type === "自宅" && course.locationDisplay && (
                             <div style={{ fontSize: "0.8rem", color: "#555" }}>
-                              <FontAwesomeIcon icon="location-dot" style={{ marginRight: "0.3rem" }} />
-                              {c.locationDisplay}
+                              <FontAwesomeIcon
+                                icon="location-dot"
+                                style={{ marginRight: "0.3rem" }}
+                              />
+                              {course.locationDisplay}
                             </div>
                           )}
                         </td>
-                        <td>{c.price}</td>
-                        <td>{c.note || "-"}</td>
+                        <td>{course.price}</td>
+                        <td>{course.note || "-"}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -254,7 +296,13 @@ const GeidaiConnectUi: React.FC = () => {
 
           <div className="review-button-wrapper">
             <button
-              onClick={() => navigate(`/mypage/review?teacher=${selectedTeacher.name}`)}
+              onClick={() =>
+                navigate(
+                  `/mypage/review?teacher=${encodeURIComponent(
+                    selectedTeacher.name
+                  )}`
+                )
+              }
               style={{
                 padding: "0.5rem 1rem",
                 backgroundColor: "#b89f6b",

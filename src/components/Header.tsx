@@ -3,6 +3,8 @@ import { faMagnifyingGlass, faUser } from '@fortawesome/free-solid-svg-icons';
 import { useState } from "react";
 import "./Header.css";
 import { Link, useNavigate } from "react-router-dom";
+import { signOut } from "firebase/auth";
+import { auth } from "../firebase";
 import { useAuth } from "../contexts/AuthContext";
 
 interface HeaderProps {
@@ -28,7 +30,18 @@ export default function Header({ onMenuClick }: HeaderProps) {
   };
 
   const handleProfileClick = () => {
-    navigate("/profile");
+    navigate("/mypage");
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setMenuOpen(false);
+      navigate("/");
+    } catch (err) {
+      console.error("ログアウトに失敗しました:", err);
+      alert("ログアウトに失敗しました。");
+    }
   };
 
   return (
@@ -46,9 +59,13 @@ export default function Header({ onMenuClick }: HeaderProps) {
           <div className="menu-dropdown">
             <button className="close-icon" onClick={() => setMenuOpen(false)}>✕</button>
             <hr />
-            <Link to="/history" onClick={() => setMenuOpen(false)}>履歴情報</Link>
-            <Link to="/profile" onClick={() => setMenuOpen(false)}>会員情報</Link>
-            <hr />
+            {user && (
+              <>
+                <Link to="/history" onClick={() => setMenuOpen(false)}>履歴情報</Link>
+                <Link to="/profile" onClick={() => setMenuOpen(false)}>会員情報</Link>
+                <hr />
+              </>
+            )}
             <Link to="/faq" onClick={() => setMenuOpen(false)}>よくあるご質問</Link>
 
             {/* ✅ ログイン中かつ講師の場合のみ表示 */}
@@ -59,7 +76,13 @@ export default function Header({ onMenuClick }: HeaderProps) {
               </>
             )}
 
-            <Link to="/logout" onClick={() => setMenuOpen(false)}>ログアウト</Link>
+            {user ? (
+              <button type="button" className="menu-logout-button" onClick={handleLogout}>
+                ログアウト
+              </button>
+            ) : (
+              <Link to="/login" onClick={() => setMenuOpen(false)}>ログイン</Link>
+            )}
             <hr />
           </div>
         )}

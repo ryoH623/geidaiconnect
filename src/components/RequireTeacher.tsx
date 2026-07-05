@@ -11,6 +11,7 @@ const RequireTeacher: React.FC<RequireTeacherProps> = ({ children }) => {
   const { user, role, loading } = useAuth();
   const location = useLocation();
 
+  console.log("RequireTeacher", { user, role, loading });
   if (loading) {
     return <div>読み込み中...</div>; // ローディング表示
   }
