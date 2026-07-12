@@ -115,6 +115,18 @@
   line-height: 1;
 }
 
+/* ヘッダーアイコンの色を統一（iOS Safari が color 未指定の <button> を
+   青ティントで描画するのを防ぎ、虫眼鏡と同じ濃色に揃える）。
+   index.css の .profile-icon(0,1,0) に勝つよう .header スコープ(0,2,0)で指定 */
+.header .menu-icon,
+.header .search-icon,
+.header .close-icon,
+.header .profile-icon {
+  color: #333;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 .close-icon {
   display: block;
   margin-left: auto;

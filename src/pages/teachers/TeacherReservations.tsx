@@ -1,15 +1,17 @@
-// src/pages/student/StudentReservations.tsx
-// 予約履歴一覧。確定済み予約はレッスン前日まで全額返金でキャンセル可能。
+// src/pages/teachers/TeacherReservations.tsx
+// 講師用: 自分宛の予約一覧（閲覧のみ）
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { httpsCallable } from "firebase/functions";
 import { useAuth } from "../../contexts/AuthContext";
-import { db, functions } from "../../firebase";
+import { db } from "../../firebase";
 import { collection, query, where, getDocs } from "firebase/firestore";
 
 interface Reservation {
   id: string;
-  teacherName: string;
+  name: string;
+  furigana: string;
+  email: string;
+  phone: string;
   lessonCourse: string;
   lessonDate: string; // "YYYY-MM-DD"
   lessonTime: string; // "HH:mm"
@@ -38,72 +40,11 @@ function statusLabel(map: Record<string, string>, value: string): string {
   return map[value] || value || "不明";
 }
 
-// JST の今日の日付（"YYYY-MM-DD"）。端末のタイムゾーンに依存しない
-function todayJst(): string {
-  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
-
-// キャンセル可能: 確定・支払済みで、レッスン日が明日以降（前日まで全額返金）
-function isCancellable(res: {
-  reservationStatus: string;
-  paymentStatus: string;
-  lessonDate: string;
-}): boolean {
-  return (
-    res.reservationStatus === "confirmed" &&
-    res.paymentStatus === "paid" &&
-    res.lessonDate > todayJst()
-  );
-}
-
-const StudentReservations: React.FC = () => {
+const TeacherReservations: React.FC = () => {
   const { user } = useAuth();
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [cancellingId, setCancellingId] = useState<string | null>(null);
-
-  const handleCancel = async (res: Reservation) => {
-    const confirmed = window.confirm(
-      `以下の予約をキャンセルします。よろしいですか？\n\n` +
-        `${res.teacherName} / ${res.lessonCourse}\n` +
-        `${res.lessonDate} ${res.lessonTime}\n\n` +
-        `お支払い済みの料金は全額返金されます。`
-    );
-    if (!confirmed) return;
-
-    try {
-      setCancellingId(res.id);
-      const callable = httpsCallable<
-        { reservationId: string },
-        { ok: boolean; message: string }
-      >(functions, "cancelReservation");
-      const result = await callable({ reservationId: res.id });
-
-      alert(result.data?.message || "予約をキャンセルしました。");
-
-      // 画面上のステータスを即時反映する
-      setReservations((prev) =>
-        prev.map((r) =>
-          r.id === res.id
-            ? {
-                ...r,
-                reservationStatus: "cancelled",
-                paymentStatus: "refunded",
-              }
-            : r
-        )
-      );
-    } catch (err: any) {
-      console.error("キャンセルエラー:", err);
-      alert(
-        err?.message ||
-          "キャンセルに失敗しました。時間をおいて再度お試しください。"
-      );
-    } finally {
-      setCancellingId(null);
-    }
-  };
 
   useEffect(() => {
     if (!user) return;
@@ -116,7 +57,7 @@ const StudentReservations: React.FC = () => {
         // orderBy を付けると複合インデックスが必要になるため、取得後にソートする
         const q = query(
           collection(db, "reservations"),
-          where("userId", "==", user.uid)
+          where("teacherId", "==", user.uid)
         );
         const querySnapshot = await getDocs(q);
 
@@ -124,7 +65,10 @@ const StudentReservations: React.FC = () => {
           const d = docSnap.data();
           return {
             id: docSnap.id,
-            teacherName: typeof d.teacherName === "string" ? d.teacherName : "",
+            name: typeof d.name === "string" ? d.name : "",
+            furigana: typeof d.furigana === "string" ? d.furigana : "",
+            email: typeof d.email === "string" ? d.email : "",
+            phone: typeof d.phone === "string" ? d.phone : "",
             lessonCourse: typeof d.lessonCourse === "string" ? d.lessonCourse : "",
             lessonDate: typeof d.lessonDate === "string" ? d.lessonDate : "",
             lessonTime: typeof d.lessonTime === "string" ? d.lessonTime : "",
@@ -149,7 +93,7 @@ const StudentReservations: React.FC = () => {
         setReservations(data);
       } catch (err) {
         console.error("予約取得エラー:", err);
-        setError("予約履歴の取得に失敗しました。時間をおいて再度お試しください。");
+        setError("予約一覧の取得に失敗しました。時間をおいて再度お試しください。");
       } finally {
         setLoading(false);
       }
@@ -161,7 +105,7 @@ const StudentReservations: React.FC = () => {
   return (
     <main className="about-section fade-in-up">
       <h2 className="centered-heading-with-border">
-        <span>予約履歴</span>
+        <span>予約一覧（講師用）</span>
       </h2>
 
       <div style={{ maxWidth: "720px", margin: "2rem auto" }}>
@@ -170,7 +114,7 @@ const StudentReservations: React.FC = () => {
         ) : error ? (
           <p style={{ textAlign: "center", color: "#c62828" }}>{error}</p>
         ) : reservations.length === 0 ? (
-          <p style={{ textAlign: "center" }}>予約が見つかりません。</p>
+          <p style={{ textAlign: "center" }}>予約はまだありません。</p>
         ) : (
           reservations.map((res) => (
             <div
@@ -185,8 +129,14 @@ const StudentReservations: React.FC = () => {
             >
               <div className="form-group">
                 <p>
-                  <strong>講師名：</strong>
-                  {res.teacherName}
+                  <strong>生徒氏名：</strong>
+                  {res.name}
+                  {res.furigana && `（${res.furigana}）`}
+                </p>
+                <p>
+                  <strong>連絡先：</strong>
+                  {res.email}
+                  {res.phone && ` / ${res.phone}`}
                 </p>
                 <p>
                   <strong>レッスンコース：</strong>
@@ -221,25 +171,6 @@ const StudentReservations: React.FC = () => {
                   </p>
                 )}
               </div>
-
-              {isCancellable(res) && (
-                <div style={{ marginTop: "12px" }}>
-                  <button
-                    type="button"
-                    className="form-button"
-                    onClick={() => handleCancel(res)}
-                    disabled={cancellingId === res.id}
-                    style={{ background: "#c62828", borderColor: "#c62828" }}
-                  >
-                    {cancellingId === res.id
-                      ? "キャンセル処理中..."
-                      : "この予約をキャンセルする（全額返金）"}
-                  </button>
-                  <p style={{ fontSize: "12px", color: "#666", marginTop: "6px" }}>
-                    キャンセルはレッスン前日まで可能です（全額返金）。当日のキャンセルはお問い合わせください。
-                  </p>
-                </div>
-              )}
             </div>
           ))
         )}
@@ -262,4 +193,4 @@ const StudentReservations: React.FC = () => {
   );
 };
 
-export default StudentReservations;
+export default TeacherReservations;

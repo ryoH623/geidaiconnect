@@ -1,0 +1,219 @@
+// src/pages/TeacherDetail.tsx
+// 講師詳細ページ（/teachers/:id）。静的データ（src/data/teachers.ts）から表示する。
+import React, { useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { teachers } from "../data/teachers";
+import type { LessonCourse } from "../data/teachers";
+import ReviewList from "../components/ReviewList";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { tagIconMap } from "../utils/tagIconMap";
+import { buildReserveUrl } from "../utils/reserveUrl";
+import { useAuth } from "../contexts/AuthContext";
+import "../index.css";
+
+const TeacherDetail: React.FC = () => {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
+  const teacher = teachers.find((t) => t.id === id) || null;
+  const [selectedCourse, setSelectedCourse] = useState<LessonCourse | null>(
+    null
+  );
+
+  if (!teacher) {
+    return (
+      <main className="about-section fade-in-up">
+        <h2 className="centered-heading-with-border">
+          <span>講師詳細</span>
+        </h2>
+        <p style={{ textAlign: "center", margin: "2rem 0" }}>
+          講師が見つかりませんでした。
+        </p>
+        <div style={{ textAlign: "center" }}>
+          <Link to="/" className="form-button">
+            トップページへ戻る
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  const canReserve = !!teacher.authUid;
+
+  const handleReserveClick = () => {
+    if (!selectedCourse) return;
+
+    if (!canReserve) {
+      alert("この講師のオンライン予約は現在準備中です。");
+      return;
+    }
+
+    const reserveUrl = buildReserveUrl(teacher, selectedCourse);
+
+    if (!user) {
+      // 未ログイン時はログイン後に予約フォームへ戻す
+      sessionStorage.setItem("redirectAfterLogin", reserveUrl);
+      navigate("/login");
+      return;
+    }
+
+    navigate(reserveUrl);
+  };
+
+  // 講師ごとの構造化データ（検索エンジン向け）
+  const jsonLd = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "Person",
+    name: teacher.name,
+    jobTitle: `${teacher.genres.join("・")}講師`,
+    alumniOf: "東京藝術大学",
+    address: {
+      "@type": "PostalAddress",
+      addressRegion: teacher.prefecture,
+      addressLocality: teacher.city,
+    },
+    url: `https://geidaiconnect.com/teachers/${teacher.id}`,
+  });
+
+  return (
+    <main
+      className="fade-in-up"
+      style={{ maxWidth: "900px", margin: "0 auto", paddingTop: "120px" /* 固定ヘッダー(120px)分 */ }}
+    >
+      {/* React 19 が <head> に巻き上げる */}
+      <title>{`${teacher.name}（${teacher.genres.join("・")}）｜GeidaiConnect`}</title>
+      <script type="application/ld+json">{jsonLd}</script>
+      <div className="teacher-profile">
+        <div className="teacher-header">
+          <div className="teacher-info">
+            <div className="teacher-name-row">
+              <h2 className="teacher-name">{teacher.name}</h2>
+              <span className="teacher-kana">{teacher.furigana}</span>
+
+              <div className="teacher-tags">
+                {teacher.tags?.map((tag: string, index: number) => (
+                  <span key={index} className="tag">
+                    {tagIconMap[tag] && (
+                      <FontAwesomeIcon
+                        icon={tagIconMap[tag]}
+                        style={{ marginRight: "0.3rem" }}
+                      />
+                    )}
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <p className="teacher-genre">{teacher.genres.join("、")}</p>
+            <p style={{ color: "#666" }}>
+              {teacher.prefecture} {teacher.city}
+            </p>
+          </div>
+
+          {teacher.photo && (
+            <img
+              src={teacher.photo}
+              alt={`${teacher.name}の写真`}
+              className="teacher-image"
+            />
+          )}
+        </div>
+
+        <p className="profile">
+          {teacher.profile.split("\n").map((line: string, i: number) => (
+            <span key={i}>
+              {line}
+              <br />
+            </span>
+          ))}
+        </p>
+
+        {teacher.courses.length > 0 && (
+          <div className="course-table">
+            <h4>レッスンコース</h4>
+            <form>
+              <table>
+                <thead>
+                  <tr>
+                    <th>選択</th>
+                    <th>コース名</th>
+                    <th>料金</th>
+                    <th>備考</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {teacher.courses.map((course, i) => (
+                    <tr key={i}>
+                      <td>
+                        <input
+                          type="radio"
+                          name="course"
+                          value={course.title}
+                          checked={selectedCourse?.title === course.title}
+                          onChange={() => setSelectedCourse(course)}
+                        />
+                      </td>
+                      <td>
+                        {course.title}
+                        {course.type === "自宅" && course.locationDisplay && (
+                          <div style={{ fontSize: "0.8rem", color: "#555" }}>
+                            <FontAwesomeIcon
+                              icon="location-dot"
+                              style={{ marginRight: "0.3rem" }}
+                            />
+                            {course.locationDisplay}
+                          </div>
+                        )}
+                      </td>
+                      <td>{course.price}</td>
+                      <td>{course.note || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </form>
+          </div>
+        )}
+
+        <div className="reserve-cta-block">
+          <button
+            onClick={handleReserveClick}
+            className="reserve-button"
+            disabled={!canReserve || !selectedCourse}
+          >
+            このコースで予約する
+          </button>
+          {!selectedCourse ? (
+            <p className="reserve-cta-hint">
+              上の表からご希望のコースを選択してください。
+            </p>
+          ) : !canReserve ? (
+            <p className="reserve-cta-hint">
+              この講師のオンライン予約は現在準備中です。お問い合わせフォームからご相談ください。
+            </p>
+          ) : null}
+        </div>
+
+        <div className="review-button-wrapper">
+          <button
+            className="review-link-button"
+            onClick={() =>
+              navigate(
+                `/mypage/review?teacher=${encodeURIComponent(teacher.name)}`
+              )
+            }
+          >
+            この講師にレビューを書く
+          </button>
+        </div>
+
+        {/* レビューは既存データとの互換のため講師名をキーにしている */}
+        <ReviewList teacherId={teacher.name} />
+      </div>
+    </main>
+  );
+};
+
+export default TeacherDetail;

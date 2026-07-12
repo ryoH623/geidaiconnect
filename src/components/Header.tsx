@@ -59,21 +59,24 @@ export default function Header({ onMenuClick }: HeaderProps) {
           <div className="menu-dropdown">
             <button className="close-icon" onClick={() => setMenuOpen(false)}>✕</button>
             <hr />
-            {user && (
-              <>
-                <Link to="/history" onClick={() => setMenuOpen(false)}>履歴情報</Link>
-                <Link to="/profile" onClick={() => setMenuOpen(false)}>会員情報</Link>
-                <hr />
-              </>
-            )}
+            {/* 会員情報・予約履歴は右上の人型アイコン→マイページに集約 */}
             <Link to="/faq" onClick={() => setMenuOpen(false)}>よくあるご質問</Link>
+            <Link to="/recruit" onClick={() => setMenuOpen(false)}>講師募集</Link>
+            <Link to="/request" onClick={() => setMenuOpen(false)}>演奏・展示のご依頼</Link>
+            <Link to="/contact" onClick={() => setMenuOpen(false)}>お問い合わせ</Link>
 
             {/* ✅ ログイン中かつ講師の場合のみ表示 */}
             {user && role === "teacher" && (
               <>
                 <Link to="/schedule-form" onClick={() => setMenuOpen(false)}>スケジュール登録</Link>
                 <Link to="/schedule-list" onClick={() => setMenuOpen(false)}>スケジュール一覧</Link>
+                <Link to="/teacher/reservations" onClick={() => setMenuOpen(false)}>予約一覧</Link>
               </>
+            )}
+
+            {/* ✅ ログイン中かつ管理者の場合のみ表示 */}
+            {user && role === "admin" && (
+              <Link to="/admin" onClick={() => setMenuOpen(false)}>管理画面</Link>
             )}
 
             {user ? (

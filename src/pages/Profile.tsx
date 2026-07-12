@@ -1,14 +1,41 @@
 // src/pages/Profile.tsx
 // 会員情報の閲覧・編集ページ。users/{uid} の内容を表示し、その場で更新できる。
-// メールアドレス（Auth）と role は変更不可。
+// パスワード変更・メールアドレス変更（再認証つき）にも対応。role は変更不可。
 import React, { useEffect, useMemo, useState } from "react";
-import { updateProfile } from "firebase/auth";
+import {
+  updateProfile,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
+  updatePassword,
+  verifyBeforeUpdateEmail,
+} from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { useAuth } from "../contexts/AuthContext";
 import { prefectures } from "../data/prefectures";
 
 type Gender = "" | "male" | "female" | "other";
+
+// Firebase Auth のエラーコードを日本語メッセージに変換する
+function authErrorMessage(code: string | undefined): string {
+  switch (code) {
+    case "auth/wrong-password":
+    case "auth/invalid-credential":
+      return "現在のパスワードが正しくありません。";
+    case "auth/weak-password":
+      return "新しいパスワードが弱すぎます。6文字以上で設定してください。";
+    case "auth/too-many-requests":
+      return "試行回数が多すぎます。しばらく時間をおいてお試しください。";
+    case "auth/requires-recent-login":
+      return "セキュリティのため再ログインが必要です。一度ログアウトし、ログインし直してからお試しください。";
+    case "auth/email-already-in-use":
+      return "このメールアドレスは既に使用されています。";
+    case "auth/invalid-email":
+      return "メールアドレスの形式が正しくありません。";
+    default:
+      return "処理に失敗しました。時間をおいて再度お試しください。";
+  }
+}
 
 const Profile: React.FC = () => {
   const { user } = useAuth();
@@ -36,6 +63,21 @@ const Profile: React.FC = () => {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [isSearchingZip, setIsSearchingZip] = useState(false);
+
+  // パスワード変更
+  const [currentPwForPassword, setCurrentPwForPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newPassword2, setNewPassword2] = useState("");
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
+  const [pwSaved, setPwSaved] = useState(false);
+
+  // メールアドレス変更
+  const [currentPwForEmail, setCurrentPwForEmail] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [emailSaving, setEmailSaving] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [emailVerifySent, setEmailVerifySent] = useState(false);
 
   const years = useMemo(() => {
     const arr: string[] = [];
@@ -159,6 +201,91 @@ const Profile: React.FC = () => {
       setSaveError("会員情報の更新に失敗しました。時間をおいて再度お試しください。");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwError(null);
+    setPwSaved(false);
+
+    const currentUser = auth.currentUser;
+    if (!currentUser || !currentUser.email) {
+      setPwError("ログイン状態を確認できませんでした。ログインし直してください。");
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setPwError("新しいパスワードは6文字以上で入力してください。");
+      return;
+    }
+
+    if (newPassword !== newPassword2) {
+      setPwError("新しいパスワード（確認）が一致しません。");
+      return;
+    }
+
+    try {
+      setPwSaving(true);
+
+      // セキュリティ操作のため、現在のパスワードで再認証してから変更する
+      const credential = EmailAuthProvider.credential(
+        currentUser.email,
+        currentPwForPassword
+      );
+      await reauthenticateWithCredential(currentUser, credential);
+      await updatePassword(currentUser, newPassword);
+
+      setPwSaved(true);
+      setCurrentPwForPassword("");
+      setNewPassword("");
+      setNewPassword2("");
+    } catch (err: any) {
+      console.error("パスワード変更に失敗しました:", err);
+      setPwError(authErrorMessage(err?.code));
+    } finally {
+      setPwSaving(false);
+    }
+  };
+
+  const handleEmailChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEmailError(null);
+    setEmailVerifySent(false);
+
+    const currentUser = auth.currentUser;
+    if (!currentUser || !currentUser.email) {
+      setEmailError("ログイン状態を確認できませんでした。ログインし直してください。");
+      return;
+    }
+
+    if (!newEmail || newEmail === currentUser.email) {
+      setEmailError("現在と異なる新しいメールアドレスを入力してください。");
+      return;
+    }
+
+    try {
+      setEmailSaving(true);
+
+      const credential = EmailAuthProvider.credential(
+        currentUser.email,
+        currentPwForEmail
+      );
+      await reauthenticateWithCredential(currentUser, credential);
+
+      // 新アドレス宛の確認メールのリンクをクリックした時点で変更が適用される
+      await verifyBeforeUpdateEmail(currentUser, newEmail, {
+        url: `${window.location.origin}/login`,
+      });
+
+      setEmailVerifySent(true);
+      setCurrentPwForEmail("");
+      setNewEmail("");
+    } catch (err: any) {
+      console.error("メールアドレス変更に失敗しました:", err);
+      setEmailError(authErrorMessage(err?.code));
+    } finally {
+      setEmailSaving(false);
     }
   };
 
@@ -293,6 +420,107 @@ const Profile: React.FC = () => {
             {saveError && <p className="error-message" role="alert">{saveError}</p>}
             {saved && (
               <p className="success-message">会員情報を更新しました。</p>
+            )}
+          </div>
+        </form>
+
+        <hr style={{ margin: "2rem 0" }} />
+
+        {/* パスワード変更 */}
+        <h3>パスワードの変更</h3>
+        <form onSubmit={handlePasswordChange} className="register-form form-grid">
+          <label>現在のパスワード</label>
+          <input
+            type="password"
+            value={currentPwForPassword}
+            onChange={(e) => setCurrentPwForPassword(e.target.value)}
+            autoComplete="current-password"
+            required
+          />
+
+          <label>新しいパスワード</label>
+          <input
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            autoComplete="new-password"
+            placeholder="6文字以上"
+            required
+          />
+
+          <label>新しいパスワード（確認）</label>
+          <input
+            type="password"
+            value={newPassword2}
+            onChange={(e) => setNewPassword2(e.target.value)}
+            autoComplete="new-password"
+            required
+          />
+
+          <div className="row-2">
+            <button
+              type="submit"
+              className="register-button"
+              disabled={pwSaving}
+              aria-disabled={pwSaving}
+            >
+              <span className="btn-text">
+                {pwSaving ? "変更中…" : "パスワードを変更"}
+              </span>
+            </button>
+
+            {pwError && <p className="error-message" role="alert">{pwError}</p>}
+            {pwSaved && (
+              <p className="success-message">パスワードを変更しました。</p>
+            )}
+          </div>
+        </form>
+
+        <hr style={{ margin: "2rem 0" }} />
+
+        {/* メールアドレス変更 */}
+        <h3>メールアドレスの変更</h3>
+        <p style={{ fontSize: "13px", color: "#666" }}>
+          新しいメールアドレス宛に確認メールが届きます。メール内のリンクをクリックした時点で変更が適用されます。
+          変更後は再ログインが必要になる場合があります。
+        </p>
+        <form onSubmit={handleEmailChange} className="register-form form-grid">
+          <label>現在のパスワード</label>
+          <input
+            type="password"
+            value={currentPwForEmail}
+            onChange={(e) => setCurrentPwForEmail(e.target.value)}
+            autoComplete="current-password"
+            required
+          />
+
+          <label>新しいメールアドレス</label>
+          <input
+            type="email"
+            value={newEmail}
+            onChange={(e) => setNewEmail(e.target.value)}
+            required
+          />
+
+          <div className="row-2">
+            <button
+              type="submit"
+              className="register-button"
+              disabled={emailSaving}
+              aria-disabled={emailSaving}
+            >
+              <span className="btn-text">
+                {emailSaving ? "送信中…" : "確認メールを送信"}
+              </span>
+            </button>
+
+            {emailError && (
+              <p className="error-message" role="alert">{emailError}</p>
+            )}
+            {emailVerifySent && (
+              <p className="success-message">
+                確認メールを送信しました。メール内のリンクをクリックすると変更が完了します。
+              </p>
             )}
           </div>
         </form>

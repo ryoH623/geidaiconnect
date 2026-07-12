@@ -11,6 +11,7 @@ const Footer: React.FC = () => {
           <a href="/terms">利用規約</a>
           <a href="/privacy">プライバシーポリシー</a>
           <a href="/contact">お問い合わせ</a>
+          <a href="/recruit">講師募集</a>
         </div>
       </div>
     </footer>
