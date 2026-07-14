@@ -1,8 +1,9 @@
 import * as admin from "firebase-admin";
-import { auth as v1auth, https, logger } from "firebase-functions/v1";
+import { auth as v1auth, https, logger, pubsub } from "firebase-functions/v1";
 import { defineString } from "firebase-functions/params";
 import nodemailer from "nodemailer";
 import type { Response } from "express";
+import { google } from "googleapis";
 
 const Stripe = require("stripe");
 
@@ -19,10 +20,25 @@ const SMTP_USER = defineString("SMTP_USER");
 const SMTP_PASS = defineString("SMTP_PASS");
 const APP_URL = defineString("APP_URL");
 
+// お問い合わせフォームの通知先（運営宛）
+const CONTACT_TO = defineString("CONTACT_TO", {
+  default: "info@geidaiconnect.com",
+});
+
 const STRIPE_SECRET_KEY = defineString("STRIPE_SECRET_KEY");
 const STRIPE_SUCCESS_URL = defineString("STRIPE_SUCCESS_URL");
 const STRIPE_CANCEL_URL = defineString("STRIPE_CANCEL_URL");
 const STRIPE_WEBHOOK_SECRET = defineString("STRIPE_WEBHOOK_SECRET");
+
+// スタジオの外部空き照会（Google カレンダー free/busy）の有効/無効。
+// ローカル・エミュレータでは "false" にすると外部呼び出しをスキップし常に空き扱いにできる。
+const STUDIO_FREEBUSY_ENABLED = defineString("STUDIO_FREEBUSY_ENABLED", {
+  default: "true",
+});
+
+// 【一時】カレンダー連携セットアップ用の管理関数のシークレット（作業後に関数ごと削除する）
+const STUDIO_ADMIN_SECRET = defineString("STUDIO_ADMIN_SECRET", { default: "" });
+
 
 // ========================================
 // SMTP / Email
@@ -118,6 +134,249 @@ function buildVerifyEmailHtml(displayName: string, link: string) {
 }
 
 // ========================================
+// 予約関連メールの共通基盤
+// ========================================
+
+/** HTML に埋め込むユーザー入力値のエスケープ */
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * users/{uid} → 無ければ Auth からメールアドレスと表示名を解決する。
+ * 予約ドキュメントの teacherEmail はフロントが空文字を渡すため信用しない。
+ */
+async function getUserContact(
+  uid: string
+): Promise<{ email: string | null; displayName: string }> {
+  let email: string | null = null;
+  let displayName = "";
+
+  try {
+    const snap = await admin.firestore().collection("users").doc(uid).get();
+    if (snap.exists) {
+      const data = snap.data() || {};
+      if (typeof data.email === "string" && data.email) {
+        email = data.email;
+      }
+      if (typeof data.displayName === "string" && data.displayName) {
+        displayName = data.displayName;
+      }
+    }
+  } catch (error) {
+    logger.warn("getUserContact: users ドキュメントの取得に失敗", { uid, error });
+  }
+
+  if (!email || !displayName) {
+    try {
+      const userRecord = await admin.auth().getUser(uid);
+      if (!email) {
+        email = userRecord.email ?? null;
+      }
+      if (!displayName) {
+        displayName = userRecord.displayName ?? "";
+      }
+    } catch (error) {
+      logger.warn("getUserContact: Auth ユーザーの取得に失敗", { uid, error });
+    }
+  }
+
+  return { email, displayName };
+}
+
+/**
+ * メール送信（失敗しても throw しない）。
+ * Webhook・スケジュール実行など、送信失敗で本処理を止めたくない箇所から使う。
+ */
+async function sendMailSafe(mail: {
+  to: string;
+  subject: string;
+  html: string;
+  replyTo?: string;
+}): Promise<boolean> {
+  try {
+    const transporter = makeTransport();
+    await transporter.sendMail({
+      from: `Geidai Connect <${SMTP_USER.value()}>`,
+      to: mail.to,
+      replyTo: mail.replyTo ?? "support@geidaiconnect.com",
+      subject: mail.subject,
+      html: mail.html,
+    });
+    logger.info("sendMailSafe success", { to: mail.to, subject: mail.subject });
+    return true;
+  } catch (error) {
+    logger.error("sendMailSafe failed", {
+      to: mail.to,
+      subject: mail.subject,
+      error,
+    });
+    return false;
+  }
+}
+
+/** サーバーのタイムゾーンに依存せず JST の "YYYY-MM-DD" を返す */
+function todayJst(offsetDays = 0): string {
+  const jst = new Date(
+    Date.now() + (9 * 60 + offsetDays * 24 * 60) * 60 * 1000
+  );
+  return jst.toISOString().slice(0, 10);
+}
+
+/**
+ * 案内メールの共通レイアウト。
+ * intro / outro は HTML として挿入するため、ユーザー入力を含める場合は
+ * 呼び出し側で escapeHtml すること。rows の値は内部でエスケープする。
+ */
+function buildInfoMailHtml(params: {
+  greetingName: string;
+  intro: string[];
+  rows: Array<[string, string]>;
+  outro?: string[];
+}): string {
+  const introHtml = params.intro.map((p) => `<p>${p}</p>`).join("\n");
+  const rowsHtml = params.rows
+    .filter(([, value]) => value !== "")
+    .map(
+      ([key, value]) =>
+        `<tr>` +
+        `<td style="padding: 4px 16px 4px 0; color: #666; white-space: nowrap; vertical-align: top;">${escapeHtml(
+          key
+        )}</td>` +
+        `<td style="padding: 4px 0;">${escapeHtml(value)}</td>` +
+        `</tr>`
+    )
+    .join("\n");
+  const outroHtml = (params.outro ?? []).map((p) => `<p>${p}</p>`).join("\n");
+
+  return `
+    <div style="font-family: Arial, 'Hiragino Kaku Gothic ProN', 'Yu Gothic', sans-serif; line-height: 1.8; color: #333;">
+      <p>${escapeHtml(params.greetingName)} 様</p>
+
+      ${introHtml}
+
+      <table style="margin: 16px 0; border-collapse: collapse;">
+        ${rowsHtml}
+      </table>
+
+      ${outroHtml}
+
+      <hr style="margin: 32px 0; border: none; border-top: 1px solid #e5e5e5;" />
+
+      <p style="font-size: 12px; color: #666;">
+        Geidai Connect<br />
+        お問い合わせ: support@geidaiconnect.com
+      </p>
+    </div>
+  `;
+}
+
+/** 予約内容の共通行（生徒向け・講師向けメールで共用） */
+function reservationRows(r: any): Array<[string, string]> {
+  return [
+    ["講師", String(r?.teacherName ?? "")],
+    ["コース", String(r?.lessonCourse ?? "")],
+    ["日時", `${r?.lessonDate ?? ""} ${r?.lessonTime ?? ""}`.trim()],
+    ["場所", String(r?.location ?? "")],
+    [
+      "金額",
+      typeof r?.lessonAmount === "number"
+        ? `${r.lessonAmount.toLocaleString("ja-JP")}円`
+        : "",
+    ],
+  ];
+}
+
+/** 予約ドキュメントから生徒の連絡先メールを取り出す */
+function studentEmailOf(r: any): string {
+  if (typeof r?.email === "string" && r.email) return r.email;
+  if (typeof r?.userEmail === "string" && r.userEmail) return r.userEmail;
+  return "";
+}
+
+/**
+ * 決済完了時の通知メール（生徒: 予約確定 / 講師: 新規予約）。
+ * Webhook から呼ぶため、失敗しても throw しない。
+ */
+async function sendPaymentCompletedEmails(reservationId: string): Promise<void> {
+  try {
+    const snap = await admin
+      .firestore()
+      .collection("reservations")
+      .doc(reservationId)
+      .get();
+
+    if (!snap.exists) {
+      logger.warn("sendPaymentCompletedEmails: 予約が見つかりません", {
+        reservationId,
+      });
+      return;
+    }
+
+    const r = snap.data() || {};
+    const studentEmail = studentEmailOf(r);
+
+    if (studentEmail) {
+      await sendMailSafe({
+        to: studentEmail,
+        subject: "【Geidai Connect】ご予約が確定しました",
+        html: buildInfoMailHtml({
+          greetingName: String(r.name || "ご利用者"),
+          intro: [
+            "お支払いが完了し、レッスンのご予約が確定しました。",
+            "ご予約内容は以下のとおりです。",
+          ],
+          rows: reservationRows(r),
+          outro: [
+            "レッスン当日はどうぞよろしくお願いいたします。",
+            "ご予約内容はマイページの「予約履歴」からもご確認いただけます。",
+          ],
+        }),
+      });
+    } else {
+      logger.warn("sendPaymentCompletedEmails: 生徒メール不明のためスキップ", {
+        reservationId,
+      });
+    }
+
+    const teacherId = typeof r.teacherId === "string" ? r.teacherId : "";
+    if (teacherId) {
+      const teacher = await getUserContact(teacherId);
+      if (teacher.email) {
+        await sendMailSafe({
+          to: teacher.email,
+          subject: "【Geidai Connect】新しい予約が入りました",
+          html: buildInfoMailHtml({
+            greetingName: teacher.displayName || String(r.teacherName || "講師"),
+            intro: ["新しいレッスン予約が確定しました（お支払い完了済み）。"],
+            rows: [
+              ...reservationRows(r),
+              ["生徒氏名", String(r.name ?? "")],
+              ["フリガナ", String(r.furigana ?? "")],
+              ["生徒メール", studentEmail],
+              ["生徒電話番号", String(r.phone ?? "")],
+              ["ご要望", String(r.notes ?? "")],
+            ],
+            outro: ["詳細はマイページの予約一覧からご確認ください。"],
+          }),
+        });
+      } else {
+        logger.warn(
+          "sendPaymentCompletedEmails: 講師メール未解決のためスキップ",
+          { reservationId, teacherId }
+        );
+      }
+    }
+  } catch (error) {
+    logger.error("sendPaymentCompletedEmails failed", { reservationId, error });
+  }
+}
+
+// ========================================
 // Stripe
 // ========================================
 function getStripeClient() {
@@ -164,6 +423,10 @@ type CreateReservationAndCheckoutData = {
   phone: string;
   location: string;
   notes?: string;
+  // スタジオ予約時のみ。料金はサーバ側で studios から再取得するため studioFee は参考値
+  studioId?: string;
+  studioName?: string;
+  studioFee?: number;
 };
 
 type CreateReservationAndCheckoutResult = {
@@ -208,6 +471,175 @@ function isValidPhone(phone: string) {
 function buildScheduleDocId(teacherId: string, date: string, time: string): string {
   return `${teacherId}_${date}_${time.replace(":", "")}`;
 }
+
+// ========================================
+// スタジオ（空き検索・予約ロック）ユーティリティ
+// ========================================
+
+// 予約済み・受付停止とみなすステータス（schedules / studioBookings 共通）
+const UNAVAILABLE_STATUSES = new Set(["closed", "reserved", "booked", "pending"]);
+
+/** studioBookings の決定的ドキュメント ID（schedules と同じ方式 → 複合インデックス不要） */
+function buildStudioBookingDocId(
+  studioId: string,
+  date: string,
+  time: string
+): string {
+  return `${studioId}_${date}_${time.replace(":", "")}`;
+}
+
+/**
+ * pending 状態のドキュメントが期限切れかどうか（pendingExpiresAt を過ぎているか）。
+ * pendingExpiresAt が無い pending は「期限切れでない」扱い（保守的）。
+ */
+function isPendingExpired(
+  data: FirebaseFirestore.DocumentData,
+  now: Date = new Date()
+): boolean {
+  if (String(data.status || "").toLowerCase() !== "pending") return false;
+  const exp = data.pendingExpiresAt;
+  return (
+    exp instanceof admin.firestore.Timestamp && exp.toMillis() <= now.getTime()
+  );
+}
+
+/** 緯度経度から 2 点間の直線距離(km)を求める（ハバーサイン公式） */
+function haversineKm(
+  aLat: number,
+  aLng: number,
+  bLat: number,
+  bLng: number
+): number {
+  const R = 6371; // 地球半径(km)
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(bLat - aLat);
+  const dLng = toRad(bLng - aLng);
+  const lat1 = toRad(aLat);
+  const lat2 = toRad(bLat);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/**
+ * 講師拠点からスタジオまで到達可能か（距離ベースの判定）。
+ * 拠点座標 or maxTravelKm が未設定なら判定不能として「到達可能扱い・距離 null」を返す。
+ * ※ 所要時間ベースに切り替える場合はこの関数だけ Google Distance Matrix 等へ差し替える。
+ */
+function judgeReachable(
+  base: { lat?: number; lng?: number; maxKm?: number },
+  studio: { lat: number; lng: number }
+): { reachable: boolean; distanceKm: number | null } {
+  if (
+    typeof base.lat !== "number" ||
+    typeof base.lng !== "number" ||
+    typeof base.maxKm !== "number" ||
+    base.maxKm <= 0
+  ) {
+    return { reachable: true, distanceKm: null };
+  }
+
+  const distanceKm = haversineKm(base.lat, base.lng, studio.lat, studio.lng);
+  return { reachable: distanceKm <= base.maxKm, distanceKm };
+}
+
+/**
+ * スタジオの指定 30 分枠が外部（Google カレンダー free/busy）で空いているか。
+ * - STUDIO_FREEBUSY_ENABLED !== "true"（ローカル/dev）: 外部照会をスキップし常に空き扱い。
+ * - calendarId が空: 外部照会をスキップし常に空き扱い（未連携スタジオ）。
+ * - 照会失敗: フォールバックで「空きでない」扱い（＝一覧から除外）。
+ */
+async function isStudioFreeExternal(
+  calendarId: string,
+  date: string,
+  time: string,
+  slotMinutes = 30
+): Promise<boolean> {
+  if (STUDIO_FREEBUSY_ENABLED.value() !== "true") {
+    return true;
+  }
+  if (!calendarId) {
+    return true;
+  }
+
+  try {
+    const startDate = new Date(`${date}T${time}:00+09:00`);
+    const endDate = new Date(startDate.getTime() + slotMinutes * 60 * 1000);
+
+    const authClient = new google.auth.GoogleAuth({
+      scopes: ["https://www.googleapis.com/auth/calendar.readonly"],
+    });
+    const calendar = google.calendar({ version: "v3", auth: authClient });
+
+    const res = await calendar.freebusy.query({
+      requestBody: {
+        timeMin: startDate.toISOString(),
+        timeMax: endDate.toISOString(),
+        items: [{ id: calendarId }],
+      },
+    });
+
+    const busy = res.data.calendars?.[calendarId]?.busy ?? [];
+    return busy.length === 0;
+  } catch (error) {
+    logger.error("isStudioFreeExternal failed", { calendarId, date, time, error });
+    return false;
+  }
+}
+
+/** 講師の users ドキュメントから拠点・移動可能距離を読む */
+async function loadTeacherTravelBase(
+  teacherId: string
+): Promise<{ lat?: number; lng?: number; maxKm?: number }> {
+  const snap = await admin.firestore().collection("users").doc(teacherId).get();
+  const u = snap.exists ? snap.data() || {} : {};
+  return {
+    lat: typeof u.baseLat === "number" ? u.baseLat : undefined,
+    lng: typeof u.baseLng === "number" ? u.baseLng : undefined,
+    maxKm: typeof u.maxTravelKm === "number" ? u.maxTravelKm : undefined,
+  };
+}
+
+type GetAvailableStudiosData = {
+  teacherId: string;
+  date: string;
+  time: string;
+  prefecture: string;
+  city?: string;
+  /** 生徒が選択した町名の座標（任意）。指定時は生徒からの近い順に並べ替える */
+  studentLat?: number;
+  studentLng?: number;
+};
+
+type AvailableStudioItem = {
+  id: string;
+  name: string;
+  address?: string;
+  pricePerSlot: number;
+  distanceKm: number | null;
+  /** 生徒が選択した町名からの直線距離(km)。座標未指定時は null */
+  studentDistanceKm: number | null;
+};
+
+/** 生徒座標として妥当か（有限数かつ日本近辺の範囲内） */
+function isValidStudentCoords(lat: unknown, lng: unknown): boolean {
+  return (
+    typeof lat === "number" &&
+    typeof lng === "number" &&
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= 20 &&
+    lat <= 46 &&
+    lng >= 122 &&
+    lng <= 154
+  );
+}
+
+type GetAvailableStudiosResult = {
+  ok: boolean;
+  studios: AvailableStudioItem[];
+};
 
 function addMinutesToDate(date: Date, minutes: number): Date {
   return new Date(date.getTime() + minutes * 60 * 1000);
@@ -490,6 +922,147 @@ export const createCheckoutSession = https.onCall(
 // Callable: create reservation + Stripe Checkout
 // 本番用
 // ========================================
+// ========================================
+// Callable: スタジオ空き検索
+// 生徒が選んだ地域・日時に対し、講師が到達可能かつ空きのあるスタジオ一覧を返す
+// ========================================
+export const getAvailableStudios = https.onCall(
+  async (
+    data: GetAvailableStudiosData,
+    context
+  ): Promise<GetAvailableStudiosResult> => {
+    if (!context.auth) {
+      throw new https.HttpsError("unauthenticated", "ログインが必要です。");
+    }
+
+    const {
+      teacherId,
+      date,
+      time,
+      prefecture,
+      city = "",
+      studentLat,
+      studentLng,
+    } = data || ({} as GetAvailableStudiosData);
+
+    if (!teacherId || !date || !time || !prefecture) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "検索に必要な情報（講師・日時・地域）が不足しています。"
+      );
+    }
+
+    // 生徒座標は任意。不正値でも検索自体は壊さない（従来動作にフォールバック）
+    const hasStudentCoords = isValidStudentCoords(studentLat, studentLng);
+    if (
+      !hasStudentCoords &&
+      (studentLat !== undefined || studentLng !== undefined)
+    ) {
+      logger.warn("getAvailableStudios: 不正な生徒座標を無視します", {
+        studentLat,
+        studentLng,
+      });
+    }
+
+    logger.info("getAvailableStudios start", {
+      uid: context.auth.uid,
+      teacherId,
+      date,
+      time,
+      prefecture,
+      city,
+      hasStudentCoords,
+    });
+
+    const base = await loadTeacherTravelBase(teacherId);
+
+    // 地域（都道府県）で一次絞り込み。複合インデックスを避けるため単一 where のみ使い、
+    // active / city はコード側でフィルタする
+    const snap = await admin
+      .firestore()
+      .collection("studios")
+      .where("prefecture", "==", prefecture)
+      .get();
+
+    const results: AvailableStudioItem[] = [];
+    const now = new Date();
+
+    for (const doc of snap.docs) {
+      const s = doc.data() || {};
+      const studioId = typeof s.id === "string" && s.id ? s.id : doc.id;
+
+      if (s.active === false) continue;
+      if (city && s.city !== city) continue;
+      if (typeof s.lat !== "number" || typeof s.lng !== "number") continue;
+
+      // 1) 到達可否（拠点からの距離）
+      const { reachable, distanceKm } = judgeReachable(base, {
+        lat: s.lat,
+        lng: s.lng,
+      });
+      if (!reachable) continue;
+
+      // 2) 自アプリ内ロック（決定的ドキュメント ID を直読み）
+      const bookingDocId = buildStudioBookingDocId(studioId, date, time);
+      const bookingSnap = await admin
+        .firestore()
+        .collection("studioBookings")
+        .doc(bookingDocId)
+        .get();
+      if (bookingSnap.exists) {
+        const b = bookingSnap.data() || {};
+        const st = String(b.status || "").toLowerCase();
+        // 期限切れの pending（決済未完了のまま放置された仮押さえ）は空き扱い
+        if (UNAVAILABLE_STATUSES.has(st) && !isPendingExpired(b, now)) {
+          continue;
+        }
+      }
+
+      // 3) 外部（Google カレンダー）空き
+      const free = await isStudioFreeExternal(
+        typeof s.calendarId === "string" ? s.calendarId : "",
+        date,
+        time
+      );
+      if (!free) continue;
+
+      // 生徒（選択した町名）からの距離
+      const studentDistanceKm = hasStudentCoords
+        ? Math.round(
+            haversineKm(studentLat as number, studentLng as number, s.lat, s.lng) * 10
+          ) / 10
+        : null;
+
+      results.push({
+        id: studioId,
+        name: typeof s.name === "string" ? s.name : studioId,
+        address: typeof s.address === "string" ? s.address : undefined,
+        pricePerSlot:
+          typeof s.pricePerSlot === "number" ? s.pricePerSlot : 0,
+        distanceKm:
+          distanceKm === null ? null : Math.round(distanceKm * 10) / 10,
+        studentDistanceKm,
+      });
+    }
+
+    // 近い順に並べる（距離不明は末尾）。生徒座標があれば生徒基準、なければ講師拠点基準
+    results.sort((a, b) => {
+      const aKm = hasStudentCoords ? a.studentDistanceKm : a.distanceKm;
+      const bKm = hasStudentCoords ? b.studentDistanceKm : b.distanceKm;
+      if (aKm === null) return bKm === null ? 0 : 1;
+      if (bKm === null) return -1;
+      return aKm - bKm;
+    });
+
+    logger.info("getAvailableStudios result", {
+      teacherId,
+      count: results.length,
+    });
+
+    return { ok: true, studios: results };
+  }
+);
+
 export const createReservationAndCheckout = https.onCall(
   async (
     data: CreateReservationAndCheckoutData,
@@ -516,6 +1089,7 @@ export const createReservationAndCheckout = https.onCall(
         phone,
         location,
         notes = "",
+        studioId = "",
       } = data || ({} as CreateReservationAndCheckoutData);
 
       if (
@@ -554,6 +1128,60 @@ export const createReservationAndCheckout = https.onCall(
         );
       }
 
+      // スタジオ予約の場合: 料金・空きをサーバ側で再検証する（クライアント値は信用しない）
+      let studioFee = 0;
+      let resolvedStudioName = "";
+      let studioBookingDocId = "";
+      if (studioId) {
+        const studioSnap = await admin
+          .firestore()
+          .collection("studios")
+          .doc(studioId)
+          .get();
+
+        if (!studioSnap.exists) {
+          throw new https.HttpsError(
+            "not-found",
+            "選択したスタジオが見つかりませんでした。"
+          );
+        }
+
+        const studio = studioSnap.data() || {};
+        studioFee =
+          typeof studio.pricePerSlot === "number" ? studio.pricePerSlot : 0;
+        resolvedStudioName =
+          typeof studio.name === "string" ? studio.name : studioId;
+        studioBookingDocId = buildStudioBookingDocId(studioId, date, time);
+
+        // 到達可否の再検証（拠点未設定なら reachable 扱い）
+        const base = await loadTeacherTravelBase(teacherId);
+        const { reachable } = judgeReachable(base, {
+          lat: typeof studio.lat === "number" ? studio.lat : 0,
+          lng: typeof studio.lng === "number" ? studio.lng : 0,
+        });
+        if (!reachable) {
+          throw new https.HttpsError(
+            "failed-precondition",
+            "このスタジオは講師の対応可能エリア外です。"
+          );
+        }
+
+        // 外部空きの再検証
+        const free = await isStudioFreeExternal(
+          typeof studio.calendarId === "string" ? studio.calendarId : "",
+          date,
+          time
+        );
+        if (!free) {
+          throw new https.HttpsError(
+            "already-exists",
+            "選択したスタジオはこの時間帯に空きがありません。"
+          );
+        }
+      }
+
+      const totalAmount = lessonAmount + studioFee;
+
       const userId = context.auth.uid;
       const authEmail =
         typeof context.auth.token.email === "string"
@@ -565,6 +1193,9 @@ export const createReservationAndCheckout = https.onCall(
 
       const scheduleDocId = buildScheduleDocId(teacherId, date, time);
       const scheduleRef = admin.firestore().collection("schedules").doc(scheduleDocId);
+      const studioBookingRef = studioBookingDocId
+        ? admin.firestore().collection("studioBookings").doc(studioBookingDocId)
+        : null;
 
       logger.info("createReservationAndCheckout start", {
         uid: userId,
@@ -577,7 +1208,11 @@ export const createReservationAndCheckout = https.onCall(
       });
 
       await admin.firestore().runTransaction(async (tx) => {
+        // Firestore トランザクションは「全読み取り → 全書き込み」の順序必須
         const scheduleSnap = await tx.get(scheduleRef);
+        const studioBookingSnap = studioBookingRef
+          ? await tx.get(studioBookingRef)
+          : null;
 
         if (!scheduleSnap.exists) {
           throw new https.HttpsError(
@@ -586,6 +1221,11 @@ export const createReservationAndCheckout = https.onCall(
           );
         }
 
+        const txNow = new Date();
+        // 期限切れ pending を奪取した場合、置き換えられた旧予約の ID を集めて
+        // 後段（書き込みフェーズ）で expired に更新する
+        const supersededReservationIds = new Set<string>();
+
         const schedule = scheduleSnap.data() || {};
         const currentStatus = String(schedule.status || "open").toLowerCase();
         const currentIsAvailable =
@@ -593,17 +1233,64 @@ export const createReservationAndCheckout = https.onCall(
             ? schedule.isAvailable
             : true;
 
-        const unavailableStatuses = new Set([
-          "closed",
-          "reserved",
-          "booked",
-          "pending",
-        ]);
-
-        if (!currentIsAvailable || unavailableStatuses.has(currentStatus)) {
+        const scheduleBlocked =
+          !currentIsAvailable || UNAVAILABLE_STATUSES.has(currentStatus);
+        // 期限切れの pending（決済未完了のまま放置）は上書き可能とする
+        if (scheduleBlocked && !isPendingExpired(schedule, txNow)) {
           throw new https.HttpsError(
             "already-exists",
             "この時間枠はすでに予約済み、または受付停止です。"
+          );
+        }
+        if (scheduleBlocked && typeof schedule.pendingReservationId === "string" && schedule.pendingReservationId) {
+          supersededReservationIds.add(schedule.pendingReservationId);
+        }
+
+        // スタジオロックの確認（他予約が押さえていないか）
+        if (studioBookingSnap && studioBookingSnap.exists) {
+          const b = studioBookingSnap.data() || {};
+          const bStatus = String(b.status || "").toLowerCase();
+          if (UNAVAILABLE_STATUSES.has(bStatus)) {
+            if (!isPendingExpired(b, txNow)) {
+              throw new https.HttpsError(
+                "already-exists",
+                "選択したスタジオはこの時間帯にすでに予約されています。"
+              );
+            }
+            if (typeof b.pendingReservationId === "string" && b.pendingReservationId) {
+              supersededReservationIds.add(b.pendingReservationId);
+            }
+          }
+        }
+
+        // 置き換え対象の旧予約を読み取り（トランザクションの読み取りは書き込みより先）
+        const supersededRefs: FirebaseFirestore.DocumentReference[] = [];
+        for (const oldId of supersededReservationIds) {
+          if (oldId === reservationId) continue;
+          const oldRef = admin.firestore().collection("reservations").doc(oldId);
+          const oldSnap = await tx.get(oldRef);
+          if (
+            oldSnap.exists &&
+            (oldSnap.data() || {}).paymentStatus === "pending_payment"
+          ) {
+            supersededRefs.push(oldRef);
+          }
+        }
+
+        const pendingExpiresAt = admin.firestore.Timestamp.fromDate(
+          addMinutesToDate(new Date(), 30)
+        );
+
+        // 期限切れ hold を奪取した場合、旧予約を expired に（webhook 処理と冪等）
+        for (const oldRef of supersededRefs) {
+          tx.set(
+            oldRef,
+            {
+              paymentStatus: "expired",
+              reservationStatus: "expired",
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
           );
         }
 
@@ -612,11 +1299,29 @@ export const createReservationAndCheckout = https.onCall(
           isAvailable: false,
           pendingReservationId: reservationId,
           pendingUserId: userId,
-          pendingExpiresAt: admin.firestore.Timestamp.fromDate(
-            addMinutesToDate(new Date(), 30)
-          ),
+          pendingExpiresAt,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
+
+        // スタジオ枠をロック（30分の pending）
+        if (studioBookingRef) {
+          tx.set(
+            studioBookingRef,
+            {
+              studioId,
+              date,
+              time,
+              status: "pending",
+              isAvailable: false,
+              pendingReservationId: reservationId,
+              pendingUserId: userId,
+              pendingExpiresAt,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+        }
 
         tx.set(reservationRef!, {
           reservationId,
@@ -636,6 +1341,12 @@ export const createReservationAndCheckout = https.onCall(
           phone,
           location,
           notes,
+          // スタジオ予約情報（非スタジオ時は null）
+          studioId: studioId || null,
+          studioName: studioId ? resolvedStudioName : null,
+          studioFee: studioId ? studioFee : null,
+          studioBookingDocId: studioBookingDocId || null,
+          totalAmount,
           paymentStatus: "pending_payment",
           reservationStatus: "pending",
           paymentProvider: "stripe",
@@ -661,22 +1372,39 @@ export const createReservationAndCheckout = https.onCall(
         `${STRIPE_SUCCESS_URL.value()}?session_id={CHECKOUT_SESSION_ID}` +
         `&reservationId=${encodeURIComponent(reservationId)}`;
 
+      const lineItems: any[] = [
+        {
+          quantity: 1,
+          price_data: {
+            currency: "jpy",
+            unit_amount: lessonAmount,
+            product_data: {
+              name: "Geidai Connect レッスン予約",
+              description: `${teacherName} / ${lessonCourse} / ${date} ${time}`,
+            },
+          },
+        },
+      ];
+
+      // スタジオ代を 2 明細目として合算
+      if (studioId && studioFee > 0) {
+        lineItems.push({
+          quantity: 1,
+          price_data: {
+            currency: "jpy",
+            unit_amount: studioFee,
+            product_data: {
+              name: "スタジオ利用料",
+              description: `${resolvedStudioName} / ${date} ${time}`,
+            },
+          },
+        });
+      }
+
       const session = await stripe.checkout.sessions.create({
         mode: "payment",
         payment_method_types: ["card", "paypay"],
-        line_items: [
-          {
-            quantity: 1,
-            price_data: {
-              currency: "jpy",
-              unit_amount: lessonAmount,
-              product_data: {
-                name: "Geidai Connect レッスン予約",
-                description: `${teacherName} / ${lessonCourse} / ${date} ${time}`,
-              },
-            },
-          },
-        ],
+        line_items: lineItems,
         success_url: successUrl,
         cancel_url: cancelUrl,
         client_reference_id: reservationId,
@@ -684,6 +1412,7 @@ export const createReservationAndCheckout = https.onCall(
         metadata: {
           reservationId,
           scheduleDocId,
+          studioBookingDocId,
           teacherId,
           teacherName,
           lessonCourse,
@@ -726,15 +1455,41 @@ export const createReservationAndCheckout = https.onCall(
           const reservationSnap = await reservationRef.get();
           const reservationData = reservationSnap.exists ? reservationSnap.data() : null;
           const scheduleDocId = reservationData?.scheduleDocId;
+          const studioBookingDocId = reservationData?.studioBookingDocId;
 
-          if (scheduleDocId) {
-            const scheduleRef = admin.firestore().collection("schedules").doc(scheduleDocId);
+          if (scheduleDocId || studioBookingDocId) {
+            const scheduleRef = scheduleDocId
+              ? admin.firestore().collection("schedules").doc(scheduleDocId)
+              : null;
+            const studioBookingRef = studioBookingDocId
+              ? admin.firestore().collection("studioBookings").doc(studioBookingDocId)
+              : null;
+
             await admin.firestore().runTransaction(async (tx) => {
-              const scheduleSnap = await tx.get(scheduleRef);
-              if (scheduleSnap.exists) {
+              // 全読み取りを先に行う
+              const scheduleSnap = scheduleRef ? await tx.get(scheduleRef) : null;
+              const studioBookingSnap = studioBookingRef
+                ? await tx.get(studioBookingRef)
+                : null;
+
+              if (scheduleRef && scheduleSnap && scheduleSnap.exists) {
                 const schedule = scheduleSnap.data() || {};
                 if (schedule.pendingReservationId === reservationRef!.id) {
                   tx.update(scheduleRef, {
+                    status: "open",
+                    isAvailable: true,
+                    pendingReservationId: admin.firestore.FieldValue.delete(),
+                    pendingUserId: admin.firestore.FieldValue.delete(),
+                    pendingExpiresAt: admin.firestore.FieldValue.delete(),
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                  });
+                }
+              }
+
+              if (studioBookingRef && studioBookingSnap && studioBookingSnap.exists) {
+                const b = studioBookingSnap.data() || {};
+                if (b.pendingReservationId === reservationRef!.id) {
+                  tx.update(studioBookingRef, {
                     status: "open",
                     isAvailable: true,
                     pendingReservationId: admin.firestore.FieldValue.delete(),
@@ -899,34 +1654,44 @@ export const getReservationForSuccess = https.onRequest(async (req, res) => {
 // HTTP: Stripe Webhook
 // ========================================
 export const stripeWebhook = https.onRequest(async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).send("Method Not Allowed");
+    return;
+  }
+
+  const signature = req.get("Stripe-Signature");
+  const webhookSecret = STRIPE_WEBHOOK_SECRET.value();
+
+  if (!signature) {
+    logger.error("stripeWebhook: missing Stripe-Signature header");
+    res.status(400).send("Missing signature");
+    return;
+  }
+
+  if (!webhookSecret) {
+    logger.error("stripeWebhook: STRIPE_WEBHOOK_SECRET is not set");
+    res.status(500).send("Webhook secret is not configured");
+    return;
+  }
+
+  // 署名検証の失敗は 400（Stripe はリトライしない）
+  let event: any;
   try {
-    if (req.method !== "POST") {
-      res.status(405).send("Method Not Allowed");
-      return;
-    }
-
-    const signature = req.get("Stripe-Signature");
-    const webhookSecret = STRIPE_WEBHOOK_SECRET.value();
-
-    if (!signature) {
-      logger.error("stripeWebhook: missing Stripe-Signature header");
-      res.status(400).send("Missing signature");
-      return;
-    }
-
-    if (!webhookSecret) {
-      logger.error("stripeWebhook: STRIPE_WEBHOOK_SECRET is not set");
-      res.status(500).send("Webhook secret is not configured");
-      return;
-    }
-
     const stripe = getStripeClient();
-    const event = stripe.webhooks.constructEvent(
+    event = stripe.webhooks.constructEvent(
       req.rawBody,
       signature,
       webhookSecret
     );
+  } catch (error: any) {
+    logger.error("stripeWebhook: signature verification failed", error);
+    res.status(400).send(`Webhook Error: ${error?.message ?? "unknown"}`);
+    return;
+  }
 
+  // ここから先の失敗は 500 を返して Stripe にリトライさせる。
+  // メール送信は sendMailSafe 内で握りつぶすため 500 の原因にはならない。
+  try {
     logger.info("stripeWebhook received", {
       type: event.type,
       id: event.id,
@@ -945,6 +1710,11 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
           ? session.metadata.scheduleDocId
           : "";
 
+      const studioBookingDocId =
+        typeof session.metadata?.studioBookingDocId === "string"
+          ? session.metadata.studioBookingDocId
+          : "";
+
       if (!reservationId) {
         logger.error("stripeWebhook: reservationId not found", {
           sessionId: session.id,
@@ -958,7 +1728,15 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
         .collection("reservations")
         .doc(reservationId);
 
-      await admin.firestore().runTransaction(async (tx) => {
+      const isFirstPaid = await admin
+        .firestore()
+        .runTransaction(async (tx) => {
+        // Stripe のイベント再送でメールが重複しないよう、
+        // pending → paid の初回遷移かどうかをトランザクション内で判定する
+        const prevSnap = await tx.get(reservationRef);
+        const prev = prevSnap.exists ? prevSnap.data() || {} : {};
+        const firstPaid = prev.paymentStatus !== "paid";
+
         tx.set(
           reservationRef,
           {
@@ -994,13 +1772,43 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
             { merge: true }
           );
         }
+
+        if (studioBookingDocId) {
+          const studioBookingRef = admin
+            .firestore()
+            .collection("studioBookings")
+            .doc(studioBookingDocId);
+
+          tx.set(
+            studioBookingRef,
+            {
+              status: "reserved",
+              isAvailable: false,
+              reservationId,
+              reservedAt: admin.firestore.FieldValue.serverTimestamp(),
+              pendingReservationId: admin.firestore.FieldValue.delete(),
+              pendingUserId: admin.firestore.FieldValue.delete(),
+              pendingExpiresAt: admin.firestore.FieldValue.delete(),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+        }
+
+        return firstPaid;
       });
 
       logger.info("stripeWebhook: reservation marked as paid", {
         reservationId,
         sessionId: session.id,
         scheduleDocId,
+        isFirstPaid,
       });
+
+      // 決済確定メール（初回の paid 遷移時のみ。失敗しても 200 を返す）
+      if (isFirstPaid) {
+        await sendPaymentCompletedEmails(reservationId);
+      }
     }
 
     if (event.type === "checkout.session.expired") {
@@ -1016,6 +1824,11 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
           ? session.metadata.scheduleDocId
           : "";
 
+      const studioBookingDocId =
+        typeof session.metadata?.studioBookingDocId === "string"
+          ? session.metadata.studioBookingDocId
+          : "";
+
       if (reservationId) {
         const reservationRef = admin
           .firestore()
@@ -1024,7 +1837,7 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
 
         await admin.firestore().runTransaction(async (tx) => {
           // Firestore のトランザクションは「読み取り→書き込み」の順序必須のため、
-          // schedules の読み取りを先に行う
+          // 読み取りを先にまとめて行う
           let scheduleRef: FirebaseFirestore.DocumentReference | null = null;
           let shouldReopenSchedule = false;
 
@@ -1037,6 +1850,24 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
               shouldReopenSchedule =
                 schedule.status === "pending" &&
                 schedule.pendingReservationId === reservationId;
+            }
+          }
+
+          let studioBookingRef: FirebaseFirestore.DocumentReference | null = null;
+          let shouldReopenStudio = false;
+
+          if (studioBookingDocId) {
+            studioBookingRef = admin
+              .firestore()
+              .collection("studioBookings")
+              .doc(studioBookingDocId);
+            const studioBookingSnap = await tx.get(studioBookingRef);
+
+            if (studioBookingSnap.exists) {
+              const b = studioBookingSnap.data() || {};
+              shouldReopenStudio =
+                b.status === "pending" &&
+                b.pendingReservationId === reservationId;
             }
           }
 
@@ -1060,6 +1891,17 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
           }
+
+          if (shouldReopenStudio && studioBookingRef) {
+            tx.update(studioBookingRef, {
+              status: "open",
+              isAvailable: true,
+              pendingReservationId: admin.firestore.FieldValue.delete(),
+              pendingUserId: admin.firestore.FieldValue.delete(),
+              pendingExpiresAt: admin.firestore.FieldValue.delete(),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          }
         });
 
         logger.info("stripeWebhook: expired session processed", {
@@ -1072,7 +1914,964 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
 
     res.status(200).send("ok");
   } catch (error: any) {
-    logger.error("stripeWebhook failed", error);
-    res.status(400).send(`Webhook Error: ${error?.message ?? "unknown"}`);
+    logger.error("stripeWebhook processing failed", error);
+    res.status(500).send("Webhook processing failed");
+  }
+});
+
+// ========================================
+// Scheduled: レッスン前日リマインダー
+// 毎日 18:00 JST に、翌日の確定済みレッスンの生徒・講師へメールを送る
+// ========================================
+export const sendLessonReminders = pubsub
+  .schedule("every day 18:00")
+  .timeZone("Asia/Tokyo")
+  .onRun(async () => {
+    const targetDate = todayJst(1);
+
+    const snapshot = await admin
+      .firestore()
+      .collection("reservations")
+      .where("lessonDate", "==", targetDate)
+      .where("reservationStatus", "==", "confirmed")
+      .get();
+
+    logger.info("sendLessonReminders start", {
+      targetDate,
+      total: snapshot.size,
+    });
+
+    let sent = 0;
+
+    for (const docSnap of snapshot.docs) {
+      // 1件の失敗で全体を止めない
+      try {
+        const r = docSnap.data() || {};
+
+        // 二重送信防止
+        if (r.reminderSentAt) {
+          continue;
+        }
+
+        const studentEmail = studentEmailOf(r);
+        if (studentEmail) {
+          await sendMailSafe({
+            to: studentEmail,
+            subject: "【Geidai Connect】明日のレッスンのご案内",
+            html: buildInfoMailHtml({
+              greetingName: String(r.name || "ご利用者"),
+              intro: ["明日、以下のレッスンのご予約があります。"],
+              rows: reservationRows(r),
+              outro: ["当日はどうぞよろしくお願いいたします。"],
+            }),
+          });
+        }
+
+        const teacherId = typeof r.teacherId === "string" ? r.teacherId : "";
+        if (teacherId) {
+          const teacher = await getUserContact(teacherId);
+          if (teacher.email) {
+            await sendMailSafe({
+              to: teacher.email,
+              subject: "【Geidai Connect】明日のレッスン予定のご案内",
+              html: buildInfoMailHtml({
+                greetingName:
+                  teacher.displayName || String(r.teacherName || "講師"),
+                intro: ["明日、以下のレッスン予定があります。"],
+                rows: [
+                  ...reservationRows(r),
+                  ["生徒氏名", String(r.name ?? "")],
+                  ["生徒電話番号", String(r.phone ?? "")],
+                ],
+                outro: ["当日はどうぞよろしくお願いいたします。"],
+              }),
+            });
+          }
+        }
+
+        await docSnap.ref.set(
+          { reminderSentAt: admin.firestore.FieldValue.serverTimestamp() },
+          { merge: true }
+        );
+        sent += 1;
+      } catch (error) {
+        logger.error("sendLessonReminders: 1件の処理に失敗", {
+          reservationId: docSnap.id,
+          error,
+        });
+      }
+    }
+
+    logger.info("sendLessonReminders done", {
+      targetDate,
+      total: snapshot.size,
+      sent,
+    });
+  });
+
+// ========================================
+// スケジュール実行: 期限切れ仮押さえの解放
+// ========================================
+
+/**
+ * schedules / studioBookings の期限切れ pending を解放する定期掃除。
+ * 通常は Stripe の checkout.session.expired webhook が解放するが、
+ * webhook が届かなかった場合の保険（pendingExpiresAt を過ぎた枠を open に戻す）。
+ * pending フィールドは昇格・解放時に削除されるため、
+ * pendingExpiresAt の単一フィールド範囲クエリで stale なドキュメントのみヒットする。
+ */
+export const releaseExpiredHolds = pubsub
+  .schedule("every 10 minutes")
+  .timeZone("Asia/Tokyo")
+  .onRun(async () => {
+    const now = admin.firestore.Timestamp.now();
+    const counts = { schedules: 0, studioBookings: 0, reservations: 0 };
+    const staleReservationIds = new Set<string>();
+
+    for (const collectionName of ["schedules", "studioBookings"] as const) {
+      const snap = await admin
+        .firestore()
+        .collection(collectionName)
+        .where("pendingExpiresAt", "<=", now)
+        .limit(200)
+        .get();
+
+      for (const doc of snap.docs) {
+        try {
+          await admin.firestore().runTransaction(async (tx) => {
+            const fresh = await tx.get(doc.ref);
+            if (!fresh.exists) return;
+            const data = fresh.data() || {};
+            // 再読して pending かつ期限切れであることを確認（webhook との競合対策）
+            if (!isPendingExpired(data)) return;
+
+            if (
+              typeof data.pendingReservationId === "string" &&
+              data.pendingReservationId
+            ) {
+              staleReservationIds.add(data.pendingReservationId);
+            }
+
+            tx.update(doc.ref, {
+              status: "open",
+              isAvailable: true,
+              pendingReservationId: admin.firestore.FieldValue.delete(),
+              pendingUserId: admin.firestore.FieldValue.delete(),
+              pendingExpiresAt: admin.firestore.FieldValue.delete(),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            counts[collectionName] += 1;
+          });
+        } catch (error) {
+          logger.error("releaseExpiredHolds: 解放に失敗", {
+            collection: collectionName,
+            docId: doc.id,
+            error,
+          });
+        }
+      }
+    }
+
+    // 解放した枠に紐づく予約を expired に（webhook 処理と冪等）
+    for (const rid of staleReservationIds) {
+      try {
+        await admin.firestore().runTransaction(async (tx) => {
+          const ref = admin.firestore().collection("reservations").doc(rid);
+          const snap = await tx.get(ref);
+          if (!snap.exists) return;
+          if ((snap.data() || {}).paymentStatus !== "pending_payment") return;
+          tx.set(
+            ref,
+            {
+              paymentStatus: "expired",
+              reservationStatus: "expired",
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+          counts.reservations += 1;
+        });
+      } catch (error) {
+        logger.error("releaseExpiredHolds: 予約の expired 更新に失敗", {
+          reservationId: rid,
+          error,
+        });
+      }
+    }
+
+    logger.info("releaseExpiredHolds done", counts);
+  });
+
+// ========================================
+// Callable: 予約キャンセル（レッスン前日まで全額返金）
+// ========================================
+export const cancelReservation = https.onCall(
+  async (
+    data: { reservationId?: string },
+    context
+  ): Promise<{ ok: boolean; message: string }> => {
+    if (!context.auth) {
+      throw new https.HttpsError("unauthenticated", "ログインが必要です。");
+    }
+
+    const reservationId =
+      typeof data?.reservationId === "string" ? data.reservationId.trim() : "";
+
+    if (!reservationId) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "予約IDが指定されていません。"
+      );
+    }
+
+    const reservationRef = admin
+      .firestore()
+      .collection("reservations")
+      .doc(reservationId);
+
+    const snap = await reservationRef.get();
+    if (!snap.exists) {
+      throw new https.HttpsError("not-found", "予約が見つかりませんでした。");
+    }
+
+    const r = snap.data() || {};
+
+    if (r.userId !== context.auth.uid) {
+      throw new https.HttpsError(
+        "permission-denied",
+        "この予約をキャンセルする権限がありません。"
+      );
+    }
+
+    if (r.reservationStatus !== "confirmed" || r.paymentStatus !== "paid") {
+      throw new https.HttpsError(
+        "failed-precondition",
+        "この予約はキャンセルできません（未決済・キャンセル済み・期限切れのいずれか）。"
+      );
+    }
+
+    // キャンセル期限: レッスン前日の 23:59（JST）まで。当日・過去は不可
+    const lessonDate = typeof r.lessonDate === "string" ? r.lessonDate : "";
+    if (!lessonDate || lessonDate <= todayJst()) {
+      throw new https.HttpsError(
+        "failed-precondition",
+        "キャンセルはレッスン前日まで可能です。当日のキャンセルはお問い合わせください。"
+      );
+    }
+
+    const paymentIntentId =
+      typeof r.stripePaymentIntentId === "string"
+        ? r.stripePaymentIntentId
+        : "";
+
+    if (!paymentIntentId) {
+      logger.error("cancelReservation: stripePaymentIntentId がありません", {
+        reservationId,
+      });
+      throw new https.HttpsError(
+        "internal",
+        "決済情報が見つからないため自動返金できません。お問い合わせください。"
+      );
+    }
+
+    logger.info("cancelReservation start", {
+      reservationId,
+      uid: context.auth.uid,
+      lessonDate,
+      paymentIntentId,
+    });
+
+    // Stripe 全額返金（失敗したら Firestore は変更しないまま中断）。
+    // 二重実行は Stripe 側が charge_already_refunded で拒否する
+    const stripe = getStripeClient();
+    let refund: any;
+    try {
+      refund = await stripe.refunds.create({
+        payment_intent: paymentIntentId,
+      });
+    } catch (error: any) {
+      logger.error("cancelReservation: refund failed", {
+        reservationId,
+        error,
+      });
+      throw new https.HttpsError(
+        "internal",
+        "返金処理に失敗しました。時間をおいて再度お試しいただくか、お問い合わせください。"
+      );
+    }
+
+    // 返金成功後: 予約をキャンセル済みにし、枠を再開放する
+    try {
+      const scheduleDocId =
+        typeof r.scheduleDocId === "string" ? r.scheduleDocId : "";
+      const studioBookingDocId =
+        typeof r.studioBookingDocId === "string" ? r.studioBookingDocId : "";
+
+      await admin.firestore().runTransaction(async (tx) => {
+        let scheduleRef: FirebaseFirestore.DocumentReference | null = null;
+        let shouldReopenSchedule = false;
+
+        if (scheduleDocId) {
+          scheduleRef = admin
+            .firestore()
+            .collection("schedules")
+            .doc(scheduleDocId);
+          const scheduleSnap = await tx.get(scheduleRef);
+
+          if (scheduleSnap.exists) {
+            const schedule = scheduleSnap.data() || {};
+            // この予約が押さえている枠のときだけ再開放する
+            shouldReopenSchedule = schedule.reservationId === reservationId;
+          }
+        }
+
+        let studioBookingRef: FirebaseFirestore.DocumentReference | null = null;
+        let shouldReopenStudio = false;
+
+        if (studioBookingDocId) {
+          studioBookingRef = admin
+            .firestore()
+            .collection("studioBookings")
+            .doc(studioBookingDocId);
+          const studioBookingSnap = await tx.get(studioBookingRef);
+
+          if (studioBookingSnap.exists) {
+            const b = studioBookingSnap.data() || {};
+            shouldReopenStudio = b.reservationId === reservationId;
+          }
+        }
+
+        tx.set(
+          reservationRef,
+          {
+            reservationStatus: "cancelled",
+            paymentStatus: "refunded",
+            refundId: refund?.id ?? null,
+            cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+
+        if (shouldReopenSchedule && scheduleRef) {
+          tx.set(
+            scheduleRef,
+            {
+              status: "open",
+              isAvailable: true,
+              reservationId: admin.firestore.FieldValue.delete(),
+              reservedAt: admin.firestore.FieldValue.delete(),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+        }
+
+        if (shouldReopenStudio && studioBookingRef) {
+          tx.set(
+            studioBookingRef,
+            {
+              status: "open",
+              isAvailable: true,
+              reservationId: admin.firestore.FieldValue.delete(),
+              reservedAt: admin.firestore.FieldValue.delete(),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+        }
+      });
+    } catch (error) {
+      // 返金は完了しているが Firestore 未反映 = 要手動対応
+      logger.error(
+        "cancelReservation: 返金成功後の Firestore 更新に失敗（要手動対応）",
+        { reservationId, refundId: refund?.id ?? null, error }
+      );
+      throw new https.HttpsError(
+        "internal",
+        "返金は完了しましたが予約情報の更新に失敗しました。お手数ですがお問い合わせください。"
+      );
+    }
+
+    logger.info("cancelReservation success", {
+      reservationId,
+      refundId: refund?.id ?? null,
+    });
+
+    // 通知メール（失敗してもキャンセル自体は成功として返す）
+    const studentEmail = studentEmailOf(r);
+    if (studentEmail) {
+      await sendMailSafe({
+        to: studentEmail,
+        subject: "【Geidai Connect】ご予約をキャンセルしました（全額返金）",
+        html: buildInfoMailHtml({
+          greetingName: String(r.name || "ご利用者"),
+          intro: [
+            "以下のご予約のキャンセルを受け付け、全額返金の手続きを行いました。",
+            "返金の反映時期はカード会社等によって異なります。",
+          ],
+          rows: reservationRows(r),
+          outro: ["またのご利用をお待ちしております。"],
+        }),
+      });
+    }
+
+    const teacherId = typeof r.teacherId === "string" ? r.teacherId : "";
+    if (teacherId) {
+      const teacher = await getUserContact(teacherId);
+      if (teacher.email) {
+        await sendMailSafe({
+          to: teacher.email,
+          subject: "【Geidai Connect】予約がキャンセルされました",
+          html: buildInfoMailHtml({
+            greetingName:
+              teacher.displayName || String(r.teacherName || "講師"),
+            intro: [
+              "以下の予約が生徒によってキャンセルされました。",
+              "該当の時間枠は再度予約可能な状態に戻っています。",
+            ],
+            rows: [...reservationRows(r), ["生徒氏名", String(r.name ?? "")]],
+          }),
+        });
+      }
+    }
+
+    return {
+      ok: true,
+      message: "予約をキャンセルし、全額返金の手続きを行いました。",
+    };
+  }
+);
+
+// ========================================
+// Callable: お問い合わせフォーム送信（未ログインでも可）
+// ========================================
+export const submitContact = https.onCall(
+  async (
+    data: {
+      name?: string;
+      email?: string;
+      subject?: string;
+      message?: string;
+    },
+    context
+  ): Promise<{ ok: boolean; message: string }> => {
+    const name = typeof data?.name === "string" ? data.name.trim() : "";
+    const email = typeof data?.email === "string" ? data.email.trim() : "";
+    const subject =
+      typeof data?.subject === "string" ? data.subject.trim() : "";
+    const message =
+      typeof data?.message === "string" ? data.message.trim() : "";
+
+    if (!name || !email || !subject || !message) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "お名前・メールアドレス・件名・お問い合わせ内容をすべて入力してください。"
+      );
+    }
+
+    // App Check 未導入のため、スパム対策は入力検証のみ（将来課題）
+    if (name.length > 100 || subject.length > 200 || message.length > 5000) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "入力された文字数が上限を超えています。"
+      );
+    }
+
+    if (!isValidEmail(email)) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "メールアドレスの形式が正しくありません。"
+      );
+    }
+
+    const docRef = await admin.firestore().collection("contacts").add({
+      name,
+      email,
+      subject,
+      message,
+      userId: context.auth?.uid ?? null,
+      status: "new",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    logger.info("submitContact saved", {
+      contactId: docRef.id,
+      userId: context.auth?.uid ?? null,
+    });
+
+    // 運営宛通知（失敗しても Firestore 保存済みなので成功として返す）
+    await sendMailSafe({
+      to: CONTACT_TO.value(),
+      replyTo: email,
+      subject: `【Geidai Connect】お問い合わせ: ${subject}`,
+      html: buildInfoMailHtml({
+        greetingName: "運営ご担当者",
+        intro: ["お問い合わせフォームから新しいお問い合わせが届きました。"],
+        rows: [
+          ["お名前", name],
+          ["メールアドレス", email],
+          ["件名", subject],
+          ["ユーザーID", context.auth?.uid ?? "未ログイン"],
+        ],
+        outro: [
+          "―― お問い合わせ内容 ――",
+          escapeHtml(message).replace(/\n/g, "<br />"),
+        ],
+      }),
+    });
+
+    return {
+      ok: true,
+      message: "お問い合わせを受け付けました。",
+    };
+  }
+);
+
+// ========================================
+// Callable: 演奏・展示などの依頼フォーム送信（未ログインでも可）
+// ========================================
+const REQUEST_TYPE_VALUES = [
+  "演奏の依頼",
+  "展示・制作の依頼",
+  "レッスン・講演の依頼",
+  "その他",
+] as const;
+
+export const submitRequest = https.onCall(
+  async (
+    data: {
+      requestType?: string;
+      name?: string;
+      email?: string;
+      phone?: string;
+      organization?: string;
+      eventDate?: string;
+      venue?: string;
+      budget?: string;
+      genre?: string;
+      message?: string;
+    },
+    context
+  ): Promise<{ ok: boolean; message: string }> => {
+    const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
+
+    const requestType = str(data?.requestType);
+    const name = str(data?.name);
+    const email = str(data?.email);
+    const phone = str(data?.phone);
+    const organization = str(data?.organization);
+    const eventDate = str(data?.eventDate);
+    const venue = str(data?.venue);
+    const budget = str(data?.budget);
+    const genre = str(data?.genre);
+    const message = str(data?.message);
+
+    if (!requestType || !name || !email || !message) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "依頼の種類・お名前・メールアドレス・依頼内容をすべて入力してください。"
+      );
+    }
+
+    if (!(REQUEST_TYPE_VALUES as readonly string[]).includes(requestType)) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "依頼の種類の値が正しくありません。"
+      );
+    }
+
+    // App Check 未導入のため、スパム対策は入力検証のみ（submitContact と同方針）
+    if (
+      name.length > 100 ||
+      phone.length > 30 ||
+      organization.length > 200 ||
+      eventDate.length > 100 ||
+      venue.length > 300 ||
+      budget.length > 100 ||
+      genre.length > 200 ||
+      message.length > 5000
+    ) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "入力された文字数が上限を超えています。"
+      );
+    }
+
+    if (!isValidEmail(email)) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "メールアドレスの形式が正しくありません。"
+      );
+    }
+
+    const docRef = await admin.firestore().collection("requests").add({
+      requestType,
+      name,
+      email,
+      phone,
+      organization,
+      eventDate,
+      venue,
+      budget,
+      genre,
+      message,
+      userId: context.auth?.uid ?? null,
+      status: "new",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    logger.info("submitRequest saved", {
+      requestId: docRef.id,
+      requestType,
+      userId: context.auth?.uid ?? null,
+    });
+
+    // 運営宛通知（失敗しても Firestore 保存済みなので成功として返す）
+    await sendMailSafe({
+      to: CONTACT_TO.value(),
+      replyTo: email,
+      subject: `【Geidai Connect】${requestType}: ${name}`,
+      html: buildInfoMailHtml({
+        greetingName: "運営ご担当者",
+        intro: ["依頼フォームから新しい依頼が届きました。"],
+        rows: [
+          ["依頼の種類", requestType],
+          ["お名前", name],
+          ["メールアドレス", email],
+          ["電話番号", phone || "未入力"],
+          ["会社・団体名", organization || "未入力"],
+          ["希望日・時期", eventDate || "未定"],
+          ["開催場所", venue || "未定"],
+          ["ご予算", budget || "未定"],
+          ["希望ジャンル・楽器", genre || "未入力"],
+          ["ユーザーID", context.auth?.uid ?? "未ログイン"],
+        ],
+        outro: [
+          "―― 依頼内容 ――",
+          escapeHtml(message).replace(/\n/g, "<br />"),
+        ],
+      }),
+    });
+
+    return {
+      ok: true,
+      message: "依頼を受け付けました。",
+    };
+  }
+);
+
+// ========================================
+// Callable: 講師応募フォーム送信（未ログインでも可）
+// ========================================
+const LESSON_TYPE_VALUES = ["自宅", "スタジオ", "出張"] as const;
+
+export const submitTeacherApplication = https.onCall(
+  async (
+    data: {
+      name?: string;
+      furigana?: string;
+      email?: string;
+      phone?: string;
+      address?: {
+        prefecture?: string;
+        city?: string;
+        town?: string;
+        line?: string;
+      };
+      subject?: string;
+      graduationYear?: number;
+      homeLessonAvailable?: boolean;
+      lessonTypes?: string[];
+      travelRange?: string;
+      bio?: string;
+    },
+    context
+  ): Promise<{ ok: boolean; message: string }> => {
+    const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
+
+    const name = str(data?.name);
+    const furigana = str(data?.furigana);
+    const email = str(data?.email);
+    const phone = str(data?.phone);
+    const address = {
+      prefecture: str(data?.address?.prefecture),
+      city: str(data?.address?.city),
+      town: str(data?.address?.town),
+      line: str(data?.address?.line),
+    };
+    const subject = str(data?.subject);
+    const bio = str(data?.bio);
+    const graduationYear = data?.graduationYear;
+    const homeLessonAvailable = data?.homeLessonAvailable;
+
+    if (
+      !name ||
+      !furigana ||
+      !email ||
+      !phone ||
+      !address.prefecture ||
+      !address.city ||
+      !address.town ||
+      !address.line ||
+      !subject ||
+      !bio
+    ) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "応募フォームの必須項目をすべて入力してください。"
+      );
+    }
+
+    // App Check 未導入のため、スパム対策は入力検証のみ（将来課題）
+    if (
+      name.length > 100 ||
+      furigana.length > 100 ||
+      subject.length > 50 ||
+      address.prefecture.length > 20 ||
+      address.city.length > 50 ||
+      address.town.length > 50 ||
+      address.line.length > 200 ||
+      bio.length > 2000
+    ) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "入力された文字数が上限を超えています。"
+      );
+    }
+
+    if (!isValidEmail(email)) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "メールアドレスの形式が正しくありません。"
+      );
+    }
+
+    if (!/^\d{10,11}$/.test(phone)) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "電話番号は10〜11桁の数字で入力してください。"
+      );
+    }
+
+    const currentYear = new Date().getFullYear();
+    if (
+      typeof graduationYear !== "number" ||
+      !Number.isInteger(graduationYear) ||
+      graduationYear < 1950 ||
+      graduationYear > currentYear
+    ) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "卒業年が正しくありません。"
+      );
+    }
+
+    if (typeof homeLessonAvailable !== "boolean") {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "自宅レッスンの可否を選択してください。"
+      );
+    }
+
+    const lessonTypes = Array.isArray(data?.lessonTypes)
+      ? data.lessonTypes
+      : [];
+    if (
+      lessonTypes.length === 0 ||
+      lessonTypes.some(
+        (t) => !LESSON_TYPE_VALUES.includes(t as (typeof LESSON_TYPE_VALUES)[number])
+      )
+    ) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "希望レッスン形態を1つ以上選択してください。"
+      );
+    }
+
+    const travelRange = str(data?.travelRange);
+    if (travelRange.length > 100) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "出張可能な範囲の内容が正しくありません。"
+      );
+    }
+    if (lessonTypes.includes("出張") && !travelRange) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "出張レッスンを希望する場合は出張可能な範囲を選択してください。"
+      );
+    }
+
+    const docRef = await admin
+      .firestore()
+      .collection("teacherApplications")
+      .add({
+        name,
+        furigana,
+        email,
+        phone,
+        address,
+        subject,
+        graduationYear,
+        homeLessonAvailable,
+        lessonTypes,
+        travelRange,
+        bio,
+        userId: context.auth?.uid ?? null,
+        status: "new",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+    logger.info("submitTeacherApplication saved", {
+      applicationId: docRef.id,
+      userId: context.auth?.uid ?? null,
+    });
+
+    // 運営宛通知（失敗しても Firestore 保存済みなので成功として返す）
+    await sendMailSafe({
+      to: CONTACT_TO.value(),
+      replyTo: email,
+      subject: `【Geidai Connect】講師応募: ${name}（${subject}）`,
+      html: buildInfoMailHtml({
+        greetingName: "運営ご担当者",
+        intro: ["講師募集フォームから新しい応募が届きました。"],
+        rows: [
+          ["氏名", name],
+          ["ふりがな", furigana],
+          ["メールアドレス", email],
+          ["電話番号", phone],
+          [
+            "住所",
+            `${address.prefecture}${address.city}${address.town} ${address.line}`,
+          ],
+          ["専攻", subject],
+          ["卒業年", `${graduationYear}年`],
+          ["自宅レッスン", homeLessonAvailable ? "可" : "不可"],
+          ["希望レッスン形態", lessonTypes.join("、")],
+          ["出張可能な範囲", travelRange || "なし"],
+          ["ユーザーID", context.auth?.uid ?? "未ログイン"],
+        ],
+        outro: [
+          "―― 経歴・自己PR ――",
+          escapeHtml(bio).replace(/\n/g, "<br />"),
+        ],
+      }),
+    });
+
+    return {
+      ok: true,
+      message: "ご応募を受け付けました。",
+    };
+  }
+);
+
+// ========================================
+// 【一時】カレンダー連携セットアップ用の管理関数（作業後に削除する）
+// GET /studioAdminHttp?secret=..&action=whoami|enableCalendarApi|freebusyTest|setCalendar
+// ========================================
+export const studioAdminHttp = https.onRequest(async (req, res) => {
+  try {
+    const secret = typeof req.query.secret === "string" ? req.query.secret : "";
+    const expected = STUDIO_ADMIN_SECRET.value();
+    if (!expected || secret !== expected) {
+      res.status(403).send("forbidden");
+      return;
+    }
+
+    const action =
+      typeof req.query.action === "string" ? req.query.action : "";
+
+    if (action === "whoami") {
+      // 実行中の Functions ランタイム サービスアカウントのメールを metadata から取得
+      const meta = await fetch(
+        "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email",
+        { headers: { "Metadata-Flavor": "Google" } }
+      );
+      const email = (await meta.text()).trim();
+      const auth = new google.auth.GoogleAuth({
+        scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+      });
+      const projectId = await auth.getProjectId();
+      res.status(200).json({ ok: true, serviceAccount: email, projectId });
+      return;
+    }
+
+    if (action === "enableCalendarApi") {
+      const auth = new google.auth.GoogleAuth({
+        scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+      });
+      const projectId = await auth.getProjectId();
+      const su = google.serviceusage({ version: "v1", auth });
+      const op = await su.services.enable({
+        name: `projects/${projectId}/services/calendar-json.googleapis.com`,
+      });
+      res.status(200).json({ ok: true, done: op.data.done ?? null, name: op.data.name ?? null });
+      return;
+    }
+
+    if (action === "freebusyTest") {
+      const calendarId =
+        typeof req.query.calendarId === "string" ? req.query.calendarId : "";
+      const date = typeof req.query.date === "string" ? req.query.date : "";
+      const time = typeof req.query.time === "string" ? req.query.time : "";
+      if (!calendarId || !date || !time) {
+        res.status(400).json({ ok: false, error: "calendarId/date/time required" });
+        return;
+      }
+      const start = new Date(`${date}T${time}:00+09:00`);
+      const end = new Date(start.getTime() + 30 * 60 * 1000);
+      const auth = new google.auth.GoogleAuth({
+        scopes: ["https://www.googleapis.com/auth/calendar.readonly"],
+      });
+      const calendar = google.calendar({ version: "v3", auth });
+      const r = await calendar.freebusy.query({
+        requestBody: {
+          timeMin: start.toISOString(),
+          timeMax: end.toISOString(),
+          items: [{ id: calendarId }],
+        },
+      });
+      const cal = r.data.calendars?.[calendarId];
+      res.status(200).json({
+        ok: true,
+        calendarId,
+        window: { timeMin: start.toISOString(), timeMax: end.toISOString() },
+        busy: cal?.busy ?? [],
+        errors: cal?.errors ?? [],
+        free: (cal?.busy ?? []).length === 0 && (cal?.errors ?? []).length === 0,
+      });
+      return;
+    }
+
+    if (action === "setCalendar") {
+      const studioId =
+        typeof req.query.studioId === "string" ? req.query.studioId : "";
+      const calendarId =
+        typeof req.query.calendarId === "string" ? req.query.calendarId : "";
+      if (!studioId) {
+        res.status(400).json({ ok: false, error: "studioId required" });
+        return;
+      }
+      await admin
+        .firestore()
+        .collection("studios")
+        .doc(studioId)
+        .set(
+          { calendarId, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+          { merge: true }
+        );
+      res.status(200).json({ ok: true, studioId, calendarId });
+      return;
+    }
+
+    res.status(400).json({ ok: false, error: "unknown action" });
+  } catch (error: any) {
+    logger.error("studioAdminHttp failed", error);
+    res.status(500).json({
+      ok: false,
+      error: String(error?.message || error),
+      details: error?.errors || error?.response?.data || null,
+    });
   }
 });

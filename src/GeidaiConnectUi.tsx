@@ -1,25 +1,159 @@
 import React, { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { teachers, LessonCourse, Teacher } from "./data/teachers";
-import { subjects } from "./data/subjects";
-import ReviewList from "./components/ReviewList";
+import { Link } from "react-router-dom";
+import { teachers, Teacher } from "./data/teachers";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import {
+  faGraduationCap,
+  faMagnifyingGlassLocation,
+  faStar,
+  faHandshake,
+  faLaptop,
+  faChildReaching,
+  faCalendarCheck,
+  faCreditCard,
+} from "@fortawesome/free-solid-svg-icons";
 import { tagIconMap } from "./utils/tagIconMap";
-import { useAuth } from "./contexts/AuthContext";
 import "./index.css";
+
+// トップページの特徴カード
+const featureItems = [
+  {
+    icon: faGraduationCap,
+    title: "藝大卒の講師陣",
+    text: "東京藝術大学を卒業したプロフェッショナルによる、高品質なレッスンをお届けします。",
+  },
+  {
+    icon: faMagnifyingGlassLocation,
+    title: "かんたん検索",
+    text: "お住まいの地域とジャンルを選ぶだけで、あなたにぴったりの講師が見つかります。",
+  },
+  {
+    icon: faStar,
+    title: "安心のレビュー",
+    text: "実際に受講した方のレビューを参考に、安心して講師を選ぶことができます。",
+  },
+  {
+    icon: faHandshake,
+    title: "依頼マッチング",
+    text: "演奏会への出演や作品の展示など、プロへのご依頼にも幅広く対応しています。",
+  },
+  {
+    icon: faLaptop,
+    title: "オンライン対応",
+    text: "遠方にお住まいの方も、オンラインレッスンで受講いただけます（講師により対応）。",
+  },
+  {
+    icon: faChildReaching,
+    title: "幅広いニーズに対応",
+    text: "お子さまの習い事から大人の本格的な学び直しまで、幅広くお応えします。",
+  },
+];
+
+// ご利用の流れ（予約までの3ステップ）
+const flowSteps = [
+  {
+    icon: faMagnifyingGlassLocation,
+    title: "講師を探す",
+    text: "講師のプロフィールやレッスンコース、レビューを見て、ぴったりの講師を選びます。",
+  },
+  {
+    icon: faCalendarCheck,
+    title: "日時を選んで予約",
+    text: "講師の空き状況カレンダーから、ご希望の日時とコースを選択します。",
+  },
+  {
+    icon: faCreditCard,
+    title: "オンライン決済で完了",
+    text: "クレジットカードで安全に決済（Stripe）。予約確定のご案内をメールでお届けします。",
+  },
+];
+
+// コース料金（"6,000円" など）から最低料金を取り出して「◯◯円〜」表示に使う
+function minCoursePrice(teacher: Teacher): string | null {
+  const prices = teacher.courses
+    .map((c) => parseInt(c.price.replace(/[^0-9]/g, ""), 10))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (prices.length === 0) return null;
+  return `${Math.min(...prices).toLocaleString()}円〜`;
+}
+
+// ヒーローの装飾アート（金彩の月と流れる弦をイメージした抽象画）
+const HeroArt: React.FC = () => (
+  <svg
+    className="hero-art"
+    viewBox="0 0 1440 720"
+    preserveAspectRatio="xMidYMid slice"
+    aria-hidden="true"
+    focusable="false"
+  >
+    <defs>
+      <linearGradient id="heroGold" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stopColor="#ecd9a8" stopOpacity="0.9" />
+        <stop offset="0.5" stopColor="#b89f6b" stopOpacity="0.6" />
+        <stop offset="1" stopColor="#8f7445" stopOpacity="0.35" />
+      </linearGradient>
+      <radialGradient id="heroGlow" cx="0.5" cy="0.5" r="0.5">
+        <stop offset="0" stopColor="#d9bd82" stopOpacity="0.35" />
+        <stop offset="0.7" stopColor="#b89f6b" stopOpacity="0.08" />
+        <stop offset="1" stopColor="#b89f6b" stopOpacity="0" />
+      </radialGradient>
+      {/* 中央のテキスト帯では弦を淡くして文字と重ならないようにする */}
+      <linearGradient id="heroStringFade" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stopColor="#c9b078" stopOpacity="0.85" />
+        <stop offset="0.28" stopColor="#c9b078" stopOpacity="0.12" />
+        <stop offset="0.72" stopColor="#c9b078" stopOpacity="0.12" />
+        <stop offset="1" stopColor="#c9b078" stopOpacity="0.85" />
+      </linearGradient>
+    </defs>
+
+    {/* 金箔の月 */}
+    <circle cx="1105" cy="285" r="300" fill="url(#heroGlow)" />
+    <circle cx="1105" cy="285" r="205" fill="none" stroke="url(#heroGold)" strokeWidth="1.4" />
+    <circle cx="1105" cy="285" r="178" fill="none" stroke="#b89f6b" strokeOpacity="0.28" strokeWidth="1" />
+    <circle cx="1105" cy="285" r="230" fill="none" stroke="#b89f6b" strokeOpacity="0.14" strokeWidth="0.8" />
+
+    {/* 流れる五線（弦）— 中央はフェードさせてコピーの可読性を守る */}
+    <path d="M-60 430 C 340 320, 760 540, 1500 380" fill="none" stroke="url(#heroStringFade)" strokeWidth="1.4" />
+    <path d="M-60 460 C 350 355, 770 570, 1500 415" fill="none" stroke="url(#heroStringFade)" strokeWidth="1.1" opacity="0.7" />
+    <path d="M-60 490 C 360 390, 780 600, 1500 450" fill="none" stroke="url(#heroStringFade)" strokeWidth="1" opacity="0.5" />
+    <path d="M-60 520 C 370 425, 790 630, 1500 485" fill="none" stroke="url(#heroStringFade)" strokeWidth="0.9" opacity="0.35" />
+    <path d="M-60 550 C 380 460, 800 660, 1500 520" fill="none" stroke="url(#heroStringFade)" strokeWidth="0.8" opacity="0.2" />
+
+    {/* 筆致のようなひとはけ */}
+    <path
+      d="M120 200 C 320 130, 560 170, 700 120 C 600 190, 380 230, 180 235 C 140 232, 110 218, 120 200 Z"
+      fill="#b89f6b"
+      opacity="0.1"
+    />
+
+    {/* 音符のような点 */}
+    <circle cx="420" cy="380" r="5" fill="#e3cd97" opacity="0.9" />
+    <circle cx="640" cy="452" r="4" fill="#d2b87e" opacity="0.75" />
+    <circle cx="900" cy="428" r="5.5" fill="#e3cd97" opacity="0.85" />
+    <circle cx="1180" cy="470" r="3.5" fill="#cdb076" opacity="0.6" />
+    <circle cx="250" cy="410" r="3.5" fill="#cdb076" opacity="0.6" />
+
+    {/* きらめき */}
+    <path d="M255 150 l5 12 12 5 -12 5 -5 12 -5 -12 -12 -5 12 -5 z" fill="#d8c28a" opacity="0.75" />
+    <path d="M830 130 l4 10 10 4 -10 4 -4 10 -4 -10 -10 -4 10 -4 z" fill="#cbb27b" opacity="0.55" />
+    <path d="M1330 170 l4 10 10 4 -10 4 -4 10 -4 -10 -10 -4 10 -4 z" fill="#d8c28a" opacity="0.65" />
+    <path d="M90 320 l3 8 8 3 -8 3 -3 8 -3 -8 -8 -3 8 -3 z" fill="#cbb27b" opacity="0.5" />
+  </svg>
+);
 
 const GeidaiConnectUi: React.FC = () => {
   const [selectedPrefecture, setSelectedPrefecture] = useState("");
   const [selectedCity, setSelectedCity] = useState("");
   const [selectedSubject, setSelectedSubject] = useState("");
-  const [selectedTeacher, setSelectedTeacher] = useState<Teacher | null>(null);
-  const [selectedCourse, setSelectedCourse] = useState<LessonCourse | null>(null);
-
-  const navigate = useNavigate();
-  const { user } = useAuth();
 
   const prefectureOptions = useMemo(
     () => Array.from(new Set(teachers.map((t) => t.prefecture))).sort(),
+    []
+  );
+
+  // ジャンルは実際に講師がいるものだけを候補にする
+  const genreOptions = useMemo(
+    () => Array.from(new Set(teachers.flatMap((t) => t.genres))).sort(),
     []
   );
 
@@ -33,62 +167,42 @@ const GeidaiConnectUi: React.FC = () => {
       ).sort()
     : [];
 
-  const showTeachers = !!selectedPrefecture && !!selectedCity;
-
+  // 絞り込みはすべて任意。未選択なら全講師を表示する
   const filteredTeachers = teachers.filter(
     (teacher) =>
-      teacher.prefecture === selectedPrefecture &&
-      teacher.city === selectedCity &&
+      (!selectedPrefecture || teacher.prefecture === selectedPrefecture) &&
+      (!selectedCity || teacher.city === selectedCity) &&
       (!selectedSubject || teacher.genres.includes(selectedSubject))
   );
 
-  const buildReserveUrl = (teacher: Teacher, course: LessonCourse) => {
-    const params = new URLSearchParams({
-      teacherId: teacher.authUid,
-      teacher: teacher.name,
-      course: course.title,
-      price: course.price,
-      lessonType: course.type,
-    });
-
-    if (course.locationDisplay) {
-      params.set("locationDisplay", course.locationDisplay);
-    }
-
-    if (course.note) {
-      params.set("note", course.note);
-    }
-
-    return `/reserve?${params.toString()}`;
-  };
-
-  const handleReserveClick = () => {
-    if (!selectedTeacher || !selectedCourse) return;
-
-    if (!selectedTeacher.authUid) {
-      alert("この講師のログインID連携が未設定です。");
-      return;
-    }
-
-    const reserveUrl = buildReserveUrl(selectedTeacher, selectedCourse);
-
-    if (!user) {
-      sessionStorage.setItem("redirectAfterLogin", reserveUrl);
-      navigate("/login");
-      return;
-    }
-
-    navigate(reserveUrl);
-  };
-
-  const handleTeacherSelect = (teacher: Teacher) => {
-    setSelectedTeacher(teacher);
-    setSelectedCourse(null);
-  };
-
   return (
-    <div>
-      <div className="about-section enhanced">
+    <div className="top-page">
+      <section className="hero">
+        <HeroArt />
+        <div className="hero-inner">
+          <p className="hero-eyebrow">東京藝術大学卒業生による、レッスン・依頼マッチング</p>
+          <h1 className="hero-title">
+            藝大卒がつなぐ、
+            <br />
+            芸術の架け橋
+          </h1>
+          <p className="hero-lead">
+            音楽も、美術も。本物のプロフェッショナルから学び、依頼する。
+            <br />
+            あなたと芸術の世界を、GeidaiConnectがつなぎます。
+          </p>
+          <div className="hero-actions">
+            <a href="#search" className="hero-cta">
+              講師を探す
+            </a>
+            <a href="#about" className="hero-cta hero-cta--ghost">
+              GeidaiConnectとは
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <div id="about" className="about-section enhanced">
         <h2>GeidaiConnect（ゲイダイ・コネクト）とは？</h2>
         <p className="catch-copy">藝大卒がつなぐ、芸術の架け橋</p>
         <p>
@@ -105,20 +219,46 @@ const GeidaiConnectUi: React.FC = () => {
 
       <section className="features-section">
         <h3>GeidaiConnectの主な特徴</h3>
-        <ul>
-          <li>藝大卒の講師による高品質なレッスン</li>
-          <li>ジャンルや地域から簡単に講師を検索</li>
-          <li>レビュー機能で安心して選べる</li>
-          <li>演奏・展示などの依頼マッチングにも対応</li>
-          <li>オンラインレッスン対応（講師により）</li>
-          <li>子どもから大人まで、幅広いニーズに対応</li>
-        </ul>
+        <div className="feature-grid">
+          {featureItems.map((item) => (
+            <div key={item.title} className="feature-card">
+              <div className="feature-icon">
+                <FontAwesomeIcon icon={item.icon} />
+              </div>
+              <h4>{item.title}</h4>
+              <p>{item.text}</p>
+            </div>
+          ))}
+        </div>
       </section>
 
-      <section className="search-section fade-in-up">
-        <h3>講師を検索する</h3>
+      <section className="flow-section">
+        <h3>ご利用の流れ</h3>
+        <div className="flow-grid">
+          {flowSteps.map((step, i) => (
+            <div key={step.title} className="flow-card">
+              <span className="flow-step-number">{i + 1}</span>
+              <div className="flow-icon">
+                <FontAwesomeIcon icon={step.icon} />
+              </div>
+              <h4>{step.title}</h4>
+              <p>{step.text}</p>
+            </div>
+          ))}
+        </div>
+        <p className="flow-note">
+          キャンセルの取り扱いについては<Link to="/terms">利用規約</Link>を、
+          よくあるご質問は<Link to="/faq">FAQ</Link>をご覧ください。
+        </p>
+      </section>
+
+      <section id="search" className="search-section fade-in-up">
+        <h3>講師を探す</h3>
         <p>
-          レッスンを受けたい「地域」と「ジャンル」を選ぶと、該当する講師が表示されます。
+          気になる講師のカードを選ぶと、プロフィール・レッスンコースの確認と予約ができます。
+        </p>
+        <p className="service-area-note">
+          現在の対応エリア：{prefectureOptions.join("・")}（順次拡大中）
         </p>
 
         <div className="selectors">
@@ -127,12 +267,10 @@ const GeidaiConnectUi: React.FC = () => {
             onChange={(e) => {
               setSelectedPrefecture(e.target.value);
               setSelectedCity("");
-              setSelectedSubject("");
-              setSelectedTeacher(null);
-              setSelectedCourse(null);
             }}
+            aria-label="都道府県で絞り込む"
           >
-            <option value="">都道府県を選択</option>
+            <option value="">都道府県（すべて）</option>
             {prefectureOptions.map((pref) => (
               <option key={pref} value={pref}>
                 {pref}
@@ -143,13 +281,10 @@ const GeidaiConnectUi: React.FC = () => {
           {selectedPrefecture && (
             <select
               value={selectedCity}
-              onChange={(e) => {
-                setSelectedCity(e.target.value);
-                setSelectedTeacher(null);
-                setSelectedCourse(null);
-              }}
+              onChange={(e) => setSelectedCity(e.target.value)}
+              aria-label="市区町村で絞り込む"
             >
-              <option value="">市区町村を選択</option>
+              <option value="">市区町村（すべて）</option>
               {cityOptions.map((city) => (
                 <option key={city} value={city}>
                   {city}
@@ -158,167 +293,81 @@ const GeidaiConnectUi: React.FC = () => {
             </select>
           )}
 
-          {selectedCity && (
-            <select
-              value={selectedSubject}
-              onChange={(e) => {
-                setSelectedSubject(e.target.value);
-                setSelectedTeacher(null);
-                setSelectedCourse(null);
-              }}
-            >
-              <option value="">ジャンルを選択（任意）</option>
-              {subjects.map((subject: string) => (
-                <option key={subject} value={subject}>
-                  {subject}
-                </option>
-              ))}
-            </select>
-          )}
+          <select
+            value={selectedSubject}
+            onChange={(e) => setSelectedSubject(e.target.value)}
+            aria-label="ジャンルで絞り込む"
+          >
+            <option value="">ジャンル（すべて）</option>
+            {genreOptions.map((genre) => (
+              <option key={genre} value={genre}>
+                {genre}
+              </option>
+            ))}
+          </select>
         </div>
 
-        {showTeachers && filteredTeachers.length > 0 && (
-          <div className="teacher-list">
-            <h3>該当する講師一覧</h3>
-            {filteredTeachers.map((teacher) => (
-              <button
-                key={teacher.name}
-                className="teacher-button"
-                onClick={() => handleTeacherSelect(teacher)}
-              >
-                {teacher.name}（{teacher.genres.join("、")}）
-              </button>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {selectedTeacher && (
-        <div className="teacher-profile">
-          <div className="teacher-header">
-            <div className="teacher-info">
-              <div className="teacher-name-row">
-                <h2 className="teacher-name">{selectedTeacher.name}</h2>
-                <span className="teacher-kana">{selectedTeacher.furigana}</span>
-
-                <div className="teacher-tags">
-                  {selectedTeacher.tags?.map((tag: string, index: number) => (
-                    <span key={index} className="tag">
-                      {tagIconMap[tag] && (
-                        <FontAwesomeIcon
-                          icon={tagIconMap[tag]}
-                          style={{ marginRight: "0.3rem" }}
-                        />
-                      )}
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <p className="teacher-genre">
-                {selectedTeacher.genres.join("、")}
-              </p>
-            </div>
-
-            {selectedTeacher.photo && (
-              <img
-                src={selectedTeacher.photo}
-                alt={`${selectedTeacher.name}の写真`}
-                className="teacher-image"
-              />
-            )}
-          </div>
-
-          <p className="profile">
-            {selectedTeacher.profile.split("\n").map((line: string, i: number) => (
-              <span key={i}>
-                {line}
-                <br />
-              </span>
-            ))}
-          </p>
-
-          {selectedTeacher.courses.length > 0 && (
-            <div className="course-table">
-              <h4>レッスンコース</h4>
-              <form>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>選択</th>
-                      <th>コース名</th>
-                      <th>料金</th>
-                      <th>備考</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedTeacher.courses.map((course, i) => (
-                      <tr key={i}>
-                        <td>
-                          <input
-                            type="radio"
-                            name="course"
-                            value={course.title}
-                            checked={selectedCourse?.title === course.title}
-                            onChange={() => setSelectedCourse(course)}
-                          />
-                        </td>
-                        <td>
-                          {course.title}
-                          {course.type === "自宅" && course.locationDisplay && (
-                            <div style={{ fontSize: "0.8rem", color: "#555" }}>
+        {filteredTeachers.length > 0 ? (
+          <div className="teacher-card-grid">
+            {filteredTeachers.map((teacher) => {
+              const price = minCoursePrice(teacher);
+              return (
+                <Link
+                  key={teacher.id}
+                  to={`/teachers/${teacher.id}`}
+                  className="tcard"
+                >
+                  {teacher.photo && (
+                    <img
+                      src={teacher.photo}
+                      alt={`${teacher.name}の写真`}
+                      className="tcard-photo"
+                      loading="lazy"
+                    />
+                  )}
+                  <div className="tcard-body">
+                    <p className="tcard-genre">{teacher.genres.join("、")}</p>
+                    <h4 className="tcard-name">
+                      {teacher.name}
+                      <span className="tcard-kana">{teacher.furigana}</span>
+                    </h4>
+                    <p className="tcard-area">
+                      {teacher.prefecture} {teacher.city}
+                    </p>
+                    {teacher.tags && teacher.tags.length > 0 && (
+                      <div className="teacher-tags">
+                        {teacher.tags.map((tag) => (
+                          <span key={tag} className="tag">
+                            {tagIconMap[tag] && (
                               <FontAwesomeIcon
-                                icon="location-dot"
+                                icon={tagIconMap[tag]}
                                 style={{ marginRight: "0.3rem" }}
                               />
-                              {course.locationDisplay}
-                            </div>
-                          )}
-                        </td>
-                        <td>{course.price}</td>
-                        <td>{course.note || "-"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </form>
-            </div>
-          )}
-
-          {selectedCourse && (
-            <div style={{ marginTop: "1rem" }}>
-              <button onClick={handleReserveClick} className="reserve-button">
-                このコースで予約する
-              </button>
-            </div>
-          )}
-
-          <div className="review-button-wrapper">
-            <button
-              onClick={() =>
-                navigate(
-                  `/mypage/review?teacher=${encodeURIComponent(
-                    selectedTeacher.name
-                  )}`
-                )
-              }
-              style={{
-                padding: "0.5rem 1rem",
-                backgroundColor: "#b89f6b",
-                color: "#fff",
-                border: "none",
-                borderRadius: "6px",
-                cursor: "pointer",
-              }}
-            >
-              この講師にレビューを書く
-            </button>
+                            )}
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="tcard-footer">
+                      {price && (
+                        <span className="tcard-price">
+                          レッスン {price}
+                        </span>
+                      )}
+                      <span className="tcard-cta">詳細・予約へ →</span>
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
           </div>
-
-          <ReviewList teacherId={selectedTeacher.name} />
-        </div>
-      )}
+        ) : (
+          <p className="teacher-empty-note">
+            条件に合う講師が見つかりませんでした。絞り込みを変更してお試しください。
+          </p>
+        )}
+      </section>
     </div>
   );
 };

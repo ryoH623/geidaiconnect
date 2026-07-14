@@ -2,7 +2,7 @@
 import React, { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { db, auth } from "../firebase";
-import { collection, addDoc, Timestamp } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 
 export default function ReviewSubmissionPage() {
   const [searchParams] = useSearchParams();
@@ -25,7 +25,8 @@ export default function ReviewSubmissionPage() {
         userId: user.uid,
         rating: Number(rating),
         comment,
-        timestamp: Timestamp.now(),
+        // 表示側（ReviewList）が createdAt を参照するため、フィールド名を統一する
+        createdAt: serverTimestamp(),
       });
       alert("レビューを送信しました！");
       setRating("");

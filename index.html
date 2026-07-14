@@ -1,13 +1,86 @@
 <!doctype html>
-<html lang="en">
+<html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/png" href="/geidai-tab.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + React + TS</title>
+    <meta
+      name="description"
+      content="GeidaiConnect（ゲイダイ・コネクト）は、東京藝術大学卒業生と、音楽・美術を学びたい方や演奏・展示を依頼したい方をつなぐマッチングサービスです。"
+    />
+    <title>GeidaiConnect｜藝大卒がつなぐ、芸術の架け橋</title>
+    <link rel="canonical" href="https://geidaiconnect.com/" />
+
+    <!-- OGP（LINE・Facebook などでのシェア用） -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="GeidaiConnect" />
+    <meta property="og:title" content="GeidaiConnect｜藝大卒がつなぐ、芸術の架け橋" />
+    <meta
+      property="og:description"
+      content="東京藝術大学卒業生によるレッスン・依頼マッチングサービス。音楽も、美術も。本物のプロフェッショナルから学び、依頼する。"
+    />
+    <meta property="og:url" content="https://geidaiconnect.com/" />
+    <meta property="og:image" content="https://geidaiconnect.com/geidai-logo.png" />
+    <meta property="og:locale" content="ja_JP" />
+
+    <!-- Twitter(X) カード -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="GeidaiConnect｜藝大卒がつなぐ、芸術の架け橋" />
+    <meta
+      name="twitter:description"
+      content="東京藝術大学卒業生によるレッスン・依頼マッチングサービス。音楽も、美術も。本物のプロフェッショナルから学び、依頼する。"
+    />
+    <meta name="twitter:image" content="https://geidaiconnect.com/geidai-logo.png" />
+
+    <!-- 構造化データ -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "GeidaiConnect",
+        "alternateName": "ゲイダイ・コネクト",
+        "url": "https://geidaiconnect.com/",
+        "description": "東京藝術大学卒業生と、音楽・美術を学びたい方や演奏・展示を依頼したい方をつなぐマッチングサービス",
+        "inLanguage": "ja"
+      }
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- JS 読み込み前・非対応クローラー向けの静的フォールバック（React マウント時に置き換わる） -->
+      <div
+        style="
+          min-height: 60vh;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+          padding: 4rem 1.5rem;
+          background: linear-gradient(135deg, #171310 0%, #241d14 55%, #17130f 100%);
+          color: #f5efe3;
+          font-family: 'Noto Serif JP', serif;
+        "
+      >
+        <p style="margin: 0 0 1.2rem; font-size: 0.85rem; letter-spacing: 0.3em; color: #cfb27c">
+          東京藝術大学卒業生による、レッスン・依頼マッチング
+        </p>
+        <h1 style="margin: 0 0 1.4rem; font-size: 2.2rem; letter-spacing: 0.1em; color: #ecd9a8">
+          藝大卒がつなぐ、芸術の架け橋
+        </h1>
+        <p style="margin: 0; line-height: 2; color: #e9e2d2">
+          音楽も、美術も。本物のプロフェッショナルから学び、依頼する。<br />
+          あなたと芸術の世界を、GeidaiConnectがつなぎます。
+        </p>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

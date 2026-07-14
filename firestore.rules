@@ -2,33 +2,82 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // users/{uid}.role が admin かどうか（管理画面用）
+    function isAdmin() {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
     match /users/{uid} {
-      allow create: if request.auth != null && request.auth.uid == uid;
-      allow read, update, delete: if request.auth != null && request.auth.uid == uid;
+      allow create: if isSignedIn() && request.auth.uid == uid;
+      allow read: if (isSignedIn() && request.auth.uid == uid) || isAdmin();
+      allow update, delete: if isSignedIn() && request.auth.uid == uid;
     }
 
     match /reservations/{reservationId} {
-      allow create: if request.auth != null;
-      allow read: if request.auth != null
-        && request.auth.uid == resource.data.userId;
-      allow update: if request.auth != null
+      allow create: if isSignedIn();
+      // 生徒本人・担当講師・admin が閲覧可能
+      allow read: if (isSignedIn()
+        && (request.auth.uid == resource.data.userId
+            || request.auth.uid == resource.data.teacherId))
+        || isAdmin();
+      allow update: if isSignedIn()
         && request.auth.uid == resource.data.userId;
       allow delete: if false;
     }
 
     match /reviews/{reviewId} {
       allow read: if true;
-      allow create: if request.auth != null;
-      allow update, delete: if request.auth != null
+      allow create: if isSignedIn();
+      allow update: if isSignedIn()
         && request.auth.uid == resource.data.userId;
+      // 削除は投稿者本人または admin（不適切レビュー対応）
+      allow delete: if (isSignedIn()
+        && request.auth.uid == resource.data.userId)
+        || isAdmin();
     }
 
     match /schedules/{scheduleId} {
       allow read: if true;
-      allow create: if request.auth != null
+      allow create: if isSignedIn()
         && request.auth.uid == request.resource.data.teacherId;
-      allow update, delete: if request.auth != null
+      allow update, delete: if isSignedIn()
         && request.auth.uid == resource.data.teacherId;
+    }
+
+    // お問い合わせ。作成は Cloud Functions（Admin SDK）経由のみ
+    match /contacts/{contactId} {
+      allow read, update: if isAdmin();
+      allow create, delete: if false;
+    }
+
+    // 講師応募。作成は Cloud Functions（Admin SDK）経由のみ
+    match /teacherApplications/{applicationId} {
+      allow read, update: if isAdmin();
+      allow create, delete: if false;
+    }
+
+    // 演奏・展示などの依頼。作成は Cloud Functions（Admin SDK）経由のみ
+    match /requests/{requestId} {
+      allow read, update: if isAdmin();
+      allow create, delete: if false;
+    }
+
+    // スタジオマスタ。空き検索のため read は公開、更新は admin のみ
+    match /studios/{studioId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // スタジオの予約ロック。空き照会のため read は公開、
+    // 書き込みは Cloud Functions（Admin SDK）経由のみ（二重予約防止）
+    match /studioBookings/{bookingId} {
+      allow read: if true;
+      allow create, update, delete: if false;
     }
   }
 }

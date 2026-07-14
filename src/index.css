@@ -55,6 +55,7 @@ a[href^="mailto"] {
 /* セクション共通スタイル */
 .about-section,
 .features-section,
+.flow-section,
 .search-section,
 .teacher-list,
 .teacher-profile,
@@ -72,6 +73,7 @@ a[href^="mailto"] {
 /* セクションタイトル調整 */
 .about-section h2,
 .features-section h3,
+.flow-section h3,
 .search-section h3,
 .teacher-list h3,
 .privacy-policy-section h2.section-title {
@@ -86,7 +88,7 @@ a[href^="mailto"] {
 .privacy-policy-section {
   max-width: 960px;
   margin: 0 auto;
-  padding: 5rem 1.5rem 3rem 1.5rem;
+  padding: 7.5rem 1.5rem 3rem 1.5rem; /* 上余白は固定ヘッダー(120px)分 */
   background-color: #ffffff;
   border-radius: 12px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
@@ -411,6 +413,12 @@ a[href^="mailto"] {
   border-radius: 8px;
 }
 
+/* お問い合わせページ：固定ヘッダーとの重なり防止
+   （.about-section.enhanced はトップページと共用のためページ側で余白を足す） */
+.contact-main {
+  padding-top: 40px;
+}
+
 /* お問い合わせ */
 .contact-outer {
   display: flex;
@@ -498,6 +506,12 @@ a[href^="mailto"] {
   scroll-margin-top: 120px;
 }
 
+/* 検索結果ページ（SearchResults）のヘッダー重なり防止 */
+.teacher-section {
+  padding-top: 140px;
+  padding-bottom: 60px;
+}
+
 .teacher-name {
   font-size: 1.8rem;
   font-weight: bold;
@@ -554,10 +568,10 @@ a[href^="mailto"] {
   align-items: center;
   font-size: 0.75rem;
   padding: 0.25rem 0.6rem;
-  background-color: #f0f4ff;
-  color: #0a3d62;
+  background-color: #f8f3eb;
+  color: #7c5b3e;
   border-radius: 12px;
-  border: 1px solid #aac4e5;
+  border: 1px solid #d6c39a;
   gap: 0.3rem;
 }
 
@@ -667,8 +681,15 @@ a[href^="mailto"] {
 }
 
 .titled-section-page {
-  padding-top: 80px;
+  padding-top: 110px; /* 固定ヘッダー(120px)＋見出し margin と合わせて重なりを防ぐ */
   padding-bottom: 80px;
+}
+
+/* FAQ 本文。モバイルで本文が画面端に密着しないよう左右余白を確保 */
+.faq-content {
+  padding-left: 1.25rem;
+  padding-right: 1.25rem;
+  box-sizing: border-box;
 }
 
 .right {
@@ -770,7 +791,7 @@ a[href^="mailto"] {
 .forgot-password {
   margin-top: 16px;
   text-align: center;
-  color: #376672;
+  color: #8f7445;
   cursor: pointer;
   font-size: 13px;
   text-decoration: underline;
@@ -1441,7 +1462,7 @@ h3 {
 ========================= */
 
 .schedule-list-page {
-  padding: 32px 16px 80px;
+  padding: 152px 16px 80px; /* 上余白は固定ヘッダー(120px)＋32px */
 }
 
 .schedule-list-container {
@@ -1772,7 +1793,7 @@ h3 {
 
 @media (max-width: 768px) {
   .schedule-list-page {
-    padding: 24px 12px 64px;
+    padding: 144px 12px 64px; /* 上余白は固定ヘッダー(120px)＋24px */
   }
 
   .schedule-list-title {
@@ -1833,7 +1854,7 @@ h3 {
 ========================= */
 
 .schedule-form-page {
-  padding: 32px 16px 80px;
+  padding: 152px 16px 80px; /* 上余白は固定ヘッダー(120px)＋32px */
 }
 
 .schedule-form-container {
@@ -2541,7 +2562,7 @@ h3 {
 
 @media (max-width: 768px) {
   .schedule-form-page {
-    padding: 24px 12px 64px;
+    padding: 144px 12px 64px; /* 上余白は固定ヘッダー(120px)＋24px */
   }
 
   .schedule-form-title {
@@ -2621,7 +2642,7 @@ h3 {
   }
 
   .schedule-list-page {
-    padding: 24px 12px 64px;
+    padding: 144px 12px 64px; /* 上余白は固定ヘッダー(120px)＋24px */
   }
 
   .schedule-list-title {
@@ -3730,4 +3751,635 @@ h3 {
   margin-top: 12px;
   color: #2f6b2f;
   line-height: 1.6;
+}
+
+/* ========================================
+   トップページ（高級感リニューアル）
+======================================== */
+
+html {
+  scroll-behavior: smooth;
+  /* スクロールバーの有無でビューポート幅が変わり、
+     固定ヘッダーのロゴ位置がページごとにずれるのを防ぐ */
+  overflow-y: scroll;
+}
+
+body {
+  background-color: #f7f4ee;
+}
+
+/* ---------- ヒーロー ---------- */
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #171310 0%, #241d14 55%, #17130f 100%);
+  border-bottom: 1px solid rgba(184, 159, 107, 0.35);
+  padding: 170px 1.5rem 96px;
+  color: #f5efe3;
+}
+
+.hero-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.hero-inner {
+  position: relative;
+  max-width: 960px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.hero-eyebrow {
+  margin: 0 0 1.4rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  color: #cfb27c;
+}
+
+.hero .hero-title {
+  margin: 0 0 1.6rem;
+  font-size: clamp(2.1rem, 5.5vw, 3.4rem);
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 0.1em;
+  background: linear-gradient(
+    120deg,
+    #ecd9a8 0%,
+    #b89f6b 40%,
+    #f0e2bf 70%,
+    #c9a96f 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.hero-lead {
+  margin: 0 auto 2.6rem;
+  max-width: 640px;
+  font-size: 1.02rem;
+  line-height: 2.1;
+  letter-spacing: 0.06em;
+  color: #e9e2d2;
+}
+
+.hero-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1.2rem;
+  flex-wrap: wrap;
+}
+
+.hero-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 220px;
+  min-height: 52px;
+  padding: 0 2.2rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #cbb079 0%, #b89f6b 55%, #a3874f 100%);
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+  transition: transform 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
+}
+
+.hero-cta:hover {
+  color: #fff;
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+}
+
+.hero-cta--ghost {
+  background: transparent;
+  border: 1px solid rgba(233, 216, 171, 0.55);
+  color: #ecdfbe;
+  box-shadow: none;
+}
+
+.hero-cta--ghost:hover {
+  color: #fff;
+  background: rgba(184, 159, 107, 0.16);
+  border-color: rgba(233, 216, 171, 0.85);
+  box-shadow: none;
+}
+
+/* ---------- セクション見出し（トップページ専用） ---------- */
+
+.about-section.enhanced {
+  scroll-margin-top: 140px;
+}
+
+.about-section.enhanced h2 {
+  border-left: none;
+  padding-left: 0;
+  text-align: center;
+  margin-top: 0;
+  padding-bottom: 1.1rem;
+  position: relative;
+}
+
+.about-section.enhanced h2::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: 64px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #b89f6b, transparent);
+}
+
+.about-section.enhanced .catch-copy {
+  text-align: center;
+  letter-spacing: 0.12em;
+}
+
+.about-section.enhanced p:not(.catch-copy) {
+  line-height: 2;
+  letter-spacing: 0.03em;
+}
+
+/* ---------- 特徴カード ---------- */
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1.5rem;
+}
+
+.feature-card {
+  background: linear-gradient(180deg, #fffdf9 0%, #faf6ee 100%);
+  border: 1px solid #e9dfc9;
+  border-radius: 14px;
+  padding: 2.2rem 1.5rem 2rem;
+  text-align: center;
+  box-shadow: 0 4px 12px rgba(58, 46, 31, 0.05);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.feature-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 28px rgba(58, 46, 31, 0.12);
+}
+
+.feature-icon {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 1.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #cbb079 0%, #b89f6b 60%, #a3874f 100%);
+  color: #fff;
+  font-size: 1.5rem;
+  box-shadow: 0 4px 12px rgba(163, 135, 79, 0.35);
+}
+
+.feature-card h4 {
+  margin: 0 0 0.7rem;
+  font-size: 1.08rem;
+  letter-spacing: 0.06em;
+  color: #3a2e1f;
+}
+
+.feature-card p {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.9;
+  color: #6b5f4e;
+}
+
+/* ---------- 検索セクションのアンカー ---------- */
+
+.search-section {
+  scroll-margin-top: 140px;
+}
+
+/* セクション上部の余白過多を解消（padding 5rem と重複するため） */
+.features-section h3,
+.flow-section h3,
+.search-section h3 {
+  margin-top: 0;
+}
+
+/* ---------- 認証解決待ちのローディング表示 ---------- */
+
+.auth-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.2rem;
+  background: #f7f4ee;
+}
+
+.auth-loading-spinner {
+  width: 44px;
+  height: 44px;
+  border: 3px solid rgba(184, 159, 107, 0.25);
+  border-top-color: #b89f6b;
+  border-radius: 50%;
+  animation: authSpin 0.9s linear infinite;
+}
+
+.auth-loading-text {
+  margin: 0;
+  font-family: "Noto Serif JP", serif;
+  font-size: 0.9rem;
+  letter-spacing: 0.25em;
+  color: #8a744e;
+}
+
+@keyframes authSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- モバイル調整 ---------- */
+
+@media (max-width: 768px) {
+  .hero {
+    padding: 150px 1.2rem 64px;
+  }
+
+  .hero-lead {
+    font-size: 0.95rem;
+  }
+
+  .hero-actions {
+    flex-direction: column;
+  }
+
+  .hero-cta {
+    /* max-width にパディングを含める（はみ出して右にずれるのを防ぐ） */
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 320px;
+  }
+}
+/* =========================================================
+   先頭見出しの統一（/contact お問い合わせページに合わせる）
+   ・中央寄せ＋金色の下線グラデーション。左の縦線・左寄せは撤去
+   ・先頭表示位置を約152px（固定ヘッダー直下）に統一
+   ・トップページ（.about-section.enhanced をトップで使用）は対象外
+   ========================================================= */
+
+/* --- 共通：先頭見出し下の金色下線 --- */
+.titled-section::after,
+.centered-heading-with-border::after,
+.about-section h2.terms-title::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: 64px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #b89f6b, transparent);
+}
+
+/* --- titled-section（運営者情報 / よくあるご質問 / プライバシーポリシー）--- */
+/* .about-section h2（詳細度 0,1,2）に勝つよう詳細度を上げ */
+.about-section h2.titled-section,
+.titled-section {
+  display: block;
+  position: relative;
+  text-align: center;
+  border-left: none; /* h2 自身の左縦線を撤去 */
+  font-size: 1.8rem;
+  font-weight: bold;
+  padding: 0 0 1.1rem 0;
+  margin: 0 0 1rem 0;
+}
+.titled-section::before {
+  display: none; /* 左の縦線を撤去 */
+}
+
+/* --- centered-heading-with-border（マイページ・予約・管理系など多数）--- */
+/* .about-section h2（詳細度 0,1,1）に勝つよう h2 を明示 */
+.about-section h2.centered-heading-with-border,
+.centered-heading-with-border {
+  display: block;
+  position: relative;
+  text-align: center;
+  border-left: none; /* h2 自身の左縦線を撤去 */
+  padding: 0 0 1.1rem 0;
+  margin: 0 0 1rem 0;
+}
+.centered-heading-with-border span {
+  border-left: none; /* span 側の左縦線を撤去 */
+  padding-left: 0;
+  font-size: 1.8rem;
+  font-weight: bold;
+}
+
+/* --- 利用規約タイトル（.about-section h2 の左縦線を上書き）--- */
+.about-section h2.terms-title {
+  position: relative;
+  border-left: none;
+  padding: 0 0 1.1rem 0;
+  text-align: center;
+  font-size: 1.8rem;
+  margin: 0 0 1rem 0;
+}
+
+/* --- 先頭表示位置を152pxに統一（固定ヘッダー120px＋余白32px）--- */
+/* centered-heading-with-border 等を載せるサブページのカード（トップは除外） */
+.about-section:not(.enhanced) {
+  padding-top: 9.5rem;
+}
+/* titled-section 系ページのラッパー */
+.operator-info-section {
+  margin-top: 0;
+  padding-top: 9.5rem;
+}
+.privacy-policy-section {
+  margin-top: 0;
+  padding-top: 9.5rem;
+}
+.main-content.titled-section-page {
+  padding-top: 9.5rem;
+}
+
+/* =========================================================
+   トップページ改善（2026-07）
+   ・ご利用の流れ（3ステップ）
+   ・講師カード一覧（常時表示・絞り込みは任意）
+   ・対応エリア表記
+   ========================================================= */
+
+/* ---------- ご利用の流れ ---------- */
+
+.flow-section {
+  margin-bottom: 3rem;
+}
+
+.flow-section h3 {
+  margin-top: 0;
+}
+
+.flow-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1.5rem;
+}
+
+.flow-card {
+  position: relative;
+  background: linear-gradient(180deg, #fffdf9 0%, #faf6ee 100%);
+  border: 1px solid #e9dfc9;
+  border-radius: 14px;
+  padding: 2.2rem 1.5rem 2rem;
+  text-align: center;
+  box-shadow: 0 4px 12px rgba(58, 46, 31, 0.05);
+}
+
+.flow-step-number {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid #d6c39a;
+  color: #a3874f;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: "Noto Serif JP", serif;
+}
+
+.flow-icon {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 1.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #cbb079 0%, #b89f6b 60%, #a3874f 100%);
+  color: #fff;
+  font-size: 1.5rem;
+  box-shadow: 0 4px 12px rgba(163, 135, 79, 0.35);
+}
+
+.flow-card h4 {
+  margin: 0 0 0.7rem;
+  font-size: 1.08rem;
+  letter-spacing: 0.06em;
+  color: #3a2e1f;
+}
+
+.flow-card p {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.9;
+  color: #6b5f4e;
+}
+
+.flow-note {
+  margin-top: 1.4rem;
+  font-size: 0.9rem;
+  color: #6b5f4e;
+  text-align: center;
+}
+
+.flow-note a {
+  color: #8a6d3f;
+  text-decoration: underline;
+}
+
+/* ---------- 対応エリア表記 ---------- */
+
+.service-area-note {
+  display: inline-block;
+  margin: 0 0 1.2rem;
+  padding: 0.35rem 0.9rem;
+  border: 1px solid #d6c39a;
+  border-radius: 999px;
+  background-color: #faf6ee;
+  color: #7c5b3e;
+  font-size: 0.88rem;
+}
+
+/* ---------- 講師カード一覧 ---------- */
+
+.teacher-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.5rem;
+  margin-top: 1rem;
+}
+
+.tcard {
+  display: flex;
+  flex-direction: column;
+  background: #fffdf9;
+  border: 1px solid #e9dfc9;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(58, 46, 31, 0.05);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  color: inherit;
+  text-decoration: none;
+}
+
+.tcard:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 28px rgba(58, 46, 31, 0.14);
+  color: inherit;
+}
+
+.tcard-photo {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  object-position: top;
+  display: block;
+}
+
+.tcard-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 1.2rem 1.3rem 1.3rem;
+  flex: 1;
+}
+
+.tcard-genre {
+  margin: 0;
+  font-size: 0.85rem;
+  letter-spacing: 0.12em;
+  color: #a3874f;
+}
+
+.tcard-name {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #3a2e1f;
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.tcard-kana {
+  font-size: 0.82rem;
+  font-weight: 400;
+  color: #8a7f6d;
+}
+
+.tcard-area {
+  margin: 0;
+  font-size: 0.88rem;
+  color: #6b5f4e;
+}
+
+.tcard-footer {
+  margin-top: auto;
+  padding-top: 0.8rem;
+  border-top: 1px solid #efe7d5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.tcard-price {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #3a2e1f;
+}
+
+.tcard-cta {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #a3874f;
+}
+
+.teacher-empty-note {
+  margin-top: 1.5rem;
+  color: #6b5f4e;
+}
+
+/* ---------- 予約CTA / レビュー導線 ---------- */
+
+.reserve-cta-block {
+  margin-top: 1.2rem;
+  text-align: center;
+}
+
+.reserve-button {
+  min-width: 260px;
+  min-height: 52px;
+  padding: 0.7rem 2.4rem;
+  font-size: 1.02rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #cbb079 0%, #b89f6b 55%, #a3874f 100%);
+  box-shadow: 0 6px 18px rgba(163, 135, 79, 0.4);
+  cursor: pointer;
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.reserve-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px rgba(163, 135, 79, 0.5);
+}
+
+.reserve-button:disabled {
+  background: #e8e2d3;
+  color: #8a7f6d;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.reserve-cta-hint {
+  margin: 0.6rem 0 0;
+  font-size: 0.85rem;
+  color: #8a7f6d;
+}
+
+/* レビュー導線は控えめなテキストリンク調にする（主役は予約CTA） */
+.review-link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #8a6d3f;
+  font-size: 0.9rem;
+  text-decoration: underline;
+  cursor: pointer;
+  font-family: "Noto Serif JP", serif;
+}
+
+.review-link-button:hover {
+  color: #6b5330;
+}
+
+.review-empty-note {
+  color: #6b5f4e;
+  font-size: 0.92rem;
 }

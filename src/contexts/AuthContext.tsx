@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { onAuthStateChanged, User as FirebaseUser } from "firebase/auth";
 import { auth, db } from "../firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 
 interface User {
   uid: string;
@@ -38,6 +38,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
           if (userDoc.exists()) {
             const userData = userDoc.data();
+
+            // メールアドレス変更（verifyBeforeUpdateEmail）は Auth 側だけ先に変わるため、
+            // ログイン時に users/{uid}.email を Auth の値に追随させる
+            if (
+              firebaseUser.email &&
+              userData.email !== firebaseUser.email
+            ) {
+              try {
+                await updateDoc(doc(db, "users", firebaseUser.uid), {
+                  email: firebaseUser.email,
+                  updatedAt: serverTimestamp(),
+                });
+              } catch (syncError) {
+                console.error("メールアドレスの同期に失敗しました", syncError);
+              }
+            }
+
             setUser({
               uid: firebaseUser.uid,
               email: firebaseUser.email,
@@ -70,7 +87,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   return (
     <AuthContext.Provider value={{ user, role, loading }}>
-      {!loading && children}
+      {loading ? (
+        // 認証状態の解決までの間、白画面の代わりにローディング表示を出す
+        <div className="auth-loading" role="status" aria-label="読み込み中">
+          <div className="auth-loading-spinner" />
+          <p className="auth-loading-text">GeidaiConnect</p>
+        </div>
+      ) : (
+        children
+      )}
     </AuthContext.Provider>
   );
 };

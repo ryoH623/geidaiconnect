@@ -10,12 +10,23 @@ import OperatorInfo from "./pages/OperatorInfo";
 import Footer from "./components/Footer";
 import ReviewSubmissionPage from "./pages/ReviewSubmissionPage";
 import SearchResults from "./components/SearchResults";
+import TeacherDetail from "./pages/TeacherDetail";
 import Contact from "./pages/Contact";
+import RequestPage from "./pages/RequestPage";
+import TeacherRecruit from "./pages/TeacherRecruit";
 import Terms from "./pages/Terms";
 import ReservationForm from "./pages/ReservationForm";
 import Faq from "./pages/Faq";
 import ScheduleForm from "./pages/teachers/ScheduleForm";
 import ScheduleList from "./pages/teachers/ScheduleList";
+import TeacherReservations from "./pages/teachers/TeacherReservations";
+import RequireAdmin from "./components/RequireAdmin";
+import AdminHome from "./pages/admin/AdminHome";
+import AdminReservations from "./pages/admin/AdminReservations";
+import AdminUsers from "./pages/admin/AdminUsers";
+import AdminReviews from "./pages/admin/AdminReviews";
+import AdminContacts from "./pages/admin/AdminContacts";
+import AdminRequests from "./pages/admin/AdminRequests";
 import RequireTeacher from "./components/RequireTeacher";
 import TestCheckoutPage from "./pages/TestCheckoutPage";
 import PaymentSuccessPage from "./pages/PaymentSuccessPage";
@@ -41,8 +52,13 @@ function App() {
           <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/mypage/review" element={<ReviewSubmissionPage />} />
           <Route path="/search" element={<SearchResults />} />
+          <Route path="/teachers/:id" element={<TeacherDetail />} />
           <Route path="/contact" element={<Contact />} />
+          {/* 演奏・展示などの依頼フォーム（公開） */}
+          <Route path="/request" element={<RequestPage />} />
           <Route path="/terms" element={<Terms />} />
+          {/* 講師募集ページ（未ログインの応募者向け・公開） */}
+          <Route path="/recruit" element={<TeacherRecruit />} />
 
           {/* 予約フォーム
               既存の /reserve を残しつつ、
@@ -99,6 +115,64 @@ function App() {
               <RequireTeacher>
                 <ScheduleList />
               </RequireTeacher>
+            }
+          />
+          <Route
+            path="/teacher/reservations"
+            element={
+              <RequireTeacher>
+                <TeacherReservations />
+              </RequireTeacher>
+            }
+          />
+
+          {/* 🔐 管理者専用ルート（ガード付き） */}
+          <Route
+            path="/admin"
+            element={
+              <RequireAdmin>
+                <AdminHome />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/reservations"
+            element={
+              <RequireAdmin>
+                <AdminReservations />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/users"
+            element={
+              <RequireAdmin>
+                <AdminUsers />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/reviews"
+            element={
+              <RequireAdmin>
+                <AdminReviews />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/contacts"
+            element={
+              <RequireAdmin>
+                <AdminContacts />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/requests"
+            element={
+              <RequireAdmin>
+                <AdminRequests />
+              </RequireAdmin>
             }
           />
         </Routes>

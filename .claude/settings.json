@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:\\Program Files\\Git\\bin\\bash.exe",
+            "args": ["C:/temp/GeidaiAtelier/my-app/.claude/hooks/auto-push.sh"],
+            "timeout": 120,
+            "statusMessage": "GitHub(claude/auto-updates)へ自動push中…"
+          }
+        ]
+      }
+    ]
+  }
+}

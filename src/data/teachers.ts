@@ -1,4 +1,6 @@
 export interface Teacher {
+  /** 講師詳細ページ（/teachers/:id）で使う URL 用スラッグ。authUid は未連携の講師がいるため使わない */
+  id: string;
   authUid: string;
   name: string;
   furigana: string;
@@ -23,6 +25,7 @@ export interface LessonCourse {
 
 export const teachers: Teacher[] = [
   {
+    id: "yosuke-inda",
     authUid: "",
     name: "印田 陽介",
     furigana: "いんだ ようすけ",
@@ -32,7 +35,7 @@ export const teachers: Teacher[] = [
     tags: ["初心者歓迎", "体験レッスンあり", "出張可"],
     profile:
       "東京藝術大学音楽学部卒業。桐朋オーケストラアカデミー研修課程修了。現在はフリーランス奏者として活動中。",
-    photo: "yosuke.jpg",
+    photo: "/yosuke.jpg",
     courses: [
       {
         type: "自宅",
@@ -73,6 +76,7 @@ export const teachers: Teacher[] = [
     ],
   },
   {
+    id: "hitoshi-takaoka",
     authUid: "ytfhgycQIkTfqEvQCN5uDpjSHgw2",
     name: "高岡 準",
     furigana: "たかおか ひとし",

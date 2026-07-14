@@ -1,12 +1,11 @@
 // src/components/ReviewList.tsx
 import { useEffect, useState } from "react";
 import { deleteDoc } from "firebase/firestore";
-import { db } from "../firebase";
+import { db, auth } from "../firebase";
 import {
   collection,
   query,
   where,
-  orderBy,
   getDocs,
   doc,
   updateDoc,
@@ -18,11 +17,19 @@ interface Props {
 
 type Review = {
   id: string;
+  userId?: string;
   rating: number;
   comment: string;
-  createdAt: { seconds: number };
+  // 旧データは timestamp フィールドに保存されているため両方を許容する
+  createdAt?: { seconds: number };
+  timestamp?: { seconds: number };
   reply?: string;
 };
+
+// createdAt（新）/ timestamp（旧）のどちらかから投稿時刻を取り出す
+function reviewSeconds(r: Review): number {
+  return r.createdAt?.seconds ?? r.timestamp?.seconds ?? 0;
+}
 
 export default function ReviewList({ teacherId }: Props) {
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -36,16 +43,19 @@ export default function ReviewList({ teacherId }: Props) {
   useEffect(() => {
     const fetchReviews = async () => {
       try {
+        // orderBy("createdAt") を付けると createdAt を持たない旧データ
+        // （timestamp フィールドのみ）が結果から除外されるため、
+        // 取得後にクライアント側でソートする
         const q = query(
           collection(db, "reviews"),
-          where("teacherId", "==", teacherId),
-          orderBy("createdAt", "desc")
+          where("teacherId", "==", teacherId)
         );
         const querySnapshot = await getDocs(q);
         const reviewData = querySnapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
         })) as Review[];
+        reviewData.sort((a, b) => reviewSeconds(b) - reviewSeconds(a));
         setReviews(reviewData);
       } catch (error) {
         console.error("レビューの取得に失敗しました", error);
@@ -116,7 +126,9 @@ export default function ReviewList({ teacherId }: Props) {
     <div className="review-list">
       <h4>レビュー一覧</h4>
       {reviews.length === 0 ? (
-        <p>まだレビューはありません。</p>
+        <p className="review-empty-note">
+          レビューを募集しています。受講された方は、ぜひ最初のレビューをお寄せください。
+        </p>
       ) : (
         <ul>
           {reviews.map((r) => (
@@ -147,10 +159,12 @@ export default function ReviewList({ teacherId }: Props) {
                     {"☆".repeat(5 - r.rating)}
                   </strong>
                   <p>{r.comment}</p>
-                  <small>
-                    投稿日:{" "}
-                    {new Date(r.createdAt.seconds * 1000).toLocaleDateString()}
-                  </small>
+                  {reviewSeconds(r) > 0 && (
+                    <small>
+                      投稿日:{" "}
+                      {new Date(reviewSeconds(r) * 1000).toLocaleDateString()}
+                    </small>
+                  )}
                   {r.reply && (
                     <div
                       className="reply-box"
@@ -165,14 +179,19 @@ export default function ReviewList({ teacherId }: Props) {
                     </div>
                   )}
                   <br />
-                  <button onClick={() => startEdit(r)}>編集</button>
-                  <button
-                    onClick={() => deleteReview(r.id)}
-                    className="delete-button"
-                  >
-                    削除
-                  </button>
-                  {!r.reply && (
+                  {/* 編集・削除は投稿者本人にのみ表示（Firestore Rules でも本人のみ許可） */}
+                  {r.userId && r.userId === auth.currentUser?.uid && (
+                    <>
+                      <button onClick={() => startEdit(r)}>編集</button>
+                      <button
+                        onClick={() => deleteReview(r.id)}
+                        className="delete-button"
+                      >
+                        削除
+                      </button>
+                    </>
+                  )}
+                  {!r.reply && auth.currentUser && (
                     <button onClick={() => setReplyingId(r.id)}>返信する</button>
                   )}
                   {replyingId === r.id && (
