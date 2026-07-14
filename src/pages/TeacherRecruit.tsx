@@ -228,6 +228,7 @@ const TeacherRecruit: React.FC = () => {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     maxLength={100}
+                    placeholder="例：藝大 花子"
                     style={{ width: "100%" }}
                   />
                   {errors.name && <p className="form-error">{errors.name}</p>}
@@ -255,6 +256,7 @@ const TeacherRecruit: React.FC = () => {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     maxLength={200}
+                    placeholder="例：hanako@example.com"
                     style={{ width: "100%" }}
                   />
                   {errors.email && <p className="form-error">{errors.email}</p>}
