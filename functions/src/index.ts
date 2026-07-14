@@ -2581,15 +2581,9 @@ export const submitTeacherApplication = https.onCall(
       };
       subject?: string;
       graduationYear?: number;
-      department?: string;
       homeLessonAvailable?: boolean;
       lessonTypes?: string[];
-      travelAreas?: {
-        prefecture?: string;
-        city?: string;
-        town?: string | null;
-        label?: string;
-      }[];
+      travelRange?: string;
       bio?: string;
     },
     context
@@ -2607,7 +2601,6 @@ export const submitTeacherApplication = https.onCall(
       line: str(data?.address?.line),
     };
     const subject = str(data?.subject);
-    const department = str(data?.department);
     const bio = str(data?.bio);
     const graduationYear = data?.graduationYear;
     const homeLessonAvailable = data?.homeLessonAvailable;
@@ -2622,7 +2615,6 @@ export const submitTeacherApplication = https.onCall(
       !address.town ||
       !address.line ||
       !subject ||
-      !department ||
       !bio
     ) {
       throw new https.HttpsError(
@@ -2635,7 +2627,6 @@ export const submitTeacherApplication = https.onCall(
     if (
       name.length > 100 ||
       furigana.length > 100 ||
-      department.length > 100 ||
       subject.length > 50 ||
       address.prefecture.length > 20 ||
       address.city.length > 50 ||
@@ -2698,30 +2689,17 @@ export const submitTeacherApplication = https.onCall(
       );
     }
 
-    const rawAreas = Array.isArray(data?.travelAreas) ? data.travelAreas : [];
-    if (rawAreas.length > 20) {
+    const travelRange = str(data?.travelRange);
+    if (travelRange.length > 100) {
       throw new https.HttpsError(
         "invalid-argument",
-        "出張可能エリアは20件以内で登録してください。"
+        "出張可能な範囲の内容が正しくありません。"
       );
     }
-    const travelAreas = rawAreas.map((area) => {
-      const prefecture = str(area?.prefecture);
-      const city = str(area?.city);
-      const town = area?.town === null ? null : str(area?.town) || null;
-      const label = str(area?.label);
-      if (!prefecture || !city || !label || label.length > 100) {
-        throw new https.HttpsError(
-          "invalid-argument",
-          "出張可能エリアの内容が正しくありません。"
-        );
-      }
-      return { prefecture, city, town, label };
-    });
-    if (lessonTypes.includes("出張") && travelAreas.length === 0) {
+    if (lessonTypes.includes("出張") && !travelRange) {
       throw new https.HttpsError(
         "invalid-argument",
-        "出張レッスンを希望する場合は出張可能エリアを1件以上登録してください。"
+        "出張レッスンを希望する場合は出張可能な範囲を選択してください。"
       );
     }
 
@@ -2736,10 +2714,9 @@ export const submitTeacherApplication = https.onCall(
         address,
         subject,
         graduationYear,
-        department,
         homeLessonAvailable,
         lessonTypes,
-        travelAreas,
+        travelRange,
         bio,
         userId: context.auth?.uid ?? null,
         status: "new",
@@ -2769,15 +2746,10 @@ export const submitTeacherApplication = https.onCall(
             `${address.prefecture}${address.city}${address.town} ${address.line}`,
           ],
           ["専攻", subject],
-          ["卒業年・学部学科", `${graduationYear}年 ${department}`],
+          ["卒業年", `${graduationYear}年`],
           ["自宅レッスン", homeLessonAvailable ? "可" : "不可"],
           ["希望レッスン形態", lessonTypes.join("、")],
-          [
-            "出張可能エリア",
-            travelAreas.length > 0
-              ? travelAreas.map((a) => a.label).join("、")
-              : "なし",
-          ],
+          ["出張可能な範囲", travelRange || "なし"],
           ["ユーザーID", context.auth?.uid ?? "未ログイン"],
         ],
         outro: [

@@ -4,23 +4,13 @@
 import React, { useEffect, useState } from "react";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase";
-import { useAuth } from "../contexts/AuthContext";
 import { subjects } from "../data/subjects";
 import type { LessonType } from "../data/teachers";
 import AddressCascadeSelect, {
   EMPTY_ADDRESS,
-  WHOLE_CITY,
   type AddressValue,
 } from "../components/AddressCascadeSelect";
 import "../index.css";
-
-/** 出張可能エリア1件分（town が null のときは市区町村全域） */
-interface TravelArea {
-  prefecture: string;
-  city: string;
-  town: string | null;
-  label: string;
-}
 
 interface TeacherApplicationPayload {
   name: string;
@@ -30,15 +20,24 @@ interface TeacherApplicationPayload {
   address: { prefecture: string; city: string; town: string; line: string };
   subject: string;
   graduationYear: number;
-  department: string;
   homeLessonAvailable: boolean;
   lessonTypes: LessonType[];
-  travelAreas: TravelArea[];
+  travelRange: string;
   bio: string;
 }
 
 const LESSON_TYPES: LessonType[] = ["自宅", "スタジオ", "出張"];
-const MAX_TRAVEL_AREAS = 20;
+
+/** 出張可能範囲（自宅からの距離・時間）の選択肢 */
+const TRAVEL_RANGES = [
+  "自宅から15分以内",
+  "自宅から30分以内",
+  "自宅から1時間以内",
+  "自宅から5km以内",
+  "自宅から10km以内",
+  "自宅から20km以内",
+] as const;
+
 const CURRENT_YEAR = new Date().getFullYear();
 const GRADUATION_YEARS = Array.from(
   { length: CURRENT_YEAR - 1960 + 1 },
@@ -69,8 +68,6 @@ const MERITS: { title: string; body: string }[] = [
 ];
 
 const TeacherRecruit: React.FC = () => {
-  const { user } = useAuth();
-
   const [name, setName] = useState("");
   const [furigana, setFurigana] = useState("");
   const [email, setEmail] = useState("");
@@ -79,11 +76,9 @@ const TeacherRecruit: React.FC = () => {
   const [addressLine, setAddressLine] = useState("");
   const [subject, setSubject] = useState("");
   const [graduationYear, setGraduationYear] = useState("");
-  const [department, setDepartment] = useState("");
   const [homeLesson, setHomeLesson] = useState<"" | "yes" | "no">("");
   const [lessonTypes, setLessonTypes] = useState<LessonType[]>([]);
-  const [areaDraft, setAreaDraft] = useState<AddressValue>(EMPTY_ADDRESS);
-  const [travelAreas, setTravelAreas] = useState<TravelArea[]>([]);
+  const [travelRange, setTravelRange] = useState("");
   const [bio, setBio] = useState("");
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -91,35 +86,22 @@ const TeacherRecruit: React.FC = () => {
   const [sent, setSent] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
-  // ログイン中は氏名・メールを初期値として自動入力する
-  useEffect(() => {
-    if (!user) return;
-    setName((prev) => prev || user.displayName || "");
-    setEmail((prev) => prev || user.email || "");
-  }, [user]);
-
   const wantsTravelLesson = lessonTypes.includes("出張");
+  // 自宅レッスン不可なら「自宅」形態は選べない
+  const homeLessonDisabled = homeLesson === "no";
+
+  // 自宅レッスン不可に切り替えたら、選択済みの「自宅」形態を解除する
+  useEffect(() => {
+    if (homeLesson === "no") {
+      setLessonTypes((prev) => prev.filter((t) => t !== "自宅"));
+    }
+  }, [homeLesson]);
 
   const toggleLessonType = (type: LessonType) => {
+    if (type === "自宅" && homeLessonDisabled) return;
     setLessonTypes((prev) =>
       prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
     );
-  };
-
-  const addTravelArea = () => {
-    const { prefecture, city, town } = areaDraft;
-    if (!prefecture || !city || !town) return;
-    const isWhole = town === WHOLE_CITY;
-    const label = isWhole ? `${prefecture}${city}（全域）` : `${prefecture}${city}${town}`;
-    setTravelAreas((prev) => {
-      if (prev.length >= MAX_TRAVEL_AREAS || prev.some((a) => a.label === label)) return prev;
-      return [...prev, { prefecture, city, town: isWhole ? null : town, label }];
-    });
-    setAreaDraft(EMPTY_ADDRESS);
-  };
-
-  const removeTravelArea = (label: string) => {
-    setTravelAreas((prev) => prev.filter((a) => a.label !== label));
   };
 
   const validate = (): Record<string, string> => {
@@ -137,12 +119,11 @@ const TeacherRecruit: React.FC = () => {
     if (!addressLine.trim()) next.addressLine = "番地・建物名等を入力してください。";
     if (!subject) next.subject = "専攻を選択してください。";
     if (!graduationYear) next.graduationYear = "卒業年を選択してください。";
-    if (!department.trim()) next.department = "学部・学科を入力してください。";
     if (!homeLesson) next.homeLesson = "自宅レッスンの可否を選択してください。";
     if (lessonTypes.length === 0)
       next.lessonTypes = "希望レッスン形態を1つ以上選択してください。";
-    if (wantsTravelLesson && travelAreas.length === 0)
-      next.travelAreas = "出張可能エリアを1件以上追加してください。";
+    if (wantsTravelLesson && !travelRange)
+      next.travelRange = "出張可能な範囲を選択してください。";
     if (!bio.trim()) next.bio = "経歴・自己PRを入力してください。";
     else if (bio.length > 2000) next.bio = "経歴・自己PRは2000文字以内で入力してください。";
     return next;
@@ -176,10 +157,9 @@ const TeacherRecruit: React.FC = () => {
         },
         subject,
         graduationYear: Number(graduationYear),
-        department: department.trim(),
         homeLessonAvailable: homeLesson === "yes",
         lessonTypes,
-        travelAreas: wantsTravelLesson ? travelAreas : [],
+        travelRange: wantsTravelLesson ? travelRange : "",
         bio: bio.trim(),
       });
 
@@ -355,20 +335,6 @@ const TeacherRecruit: React.FC = () => {
                 </div>
 
                 <div className="form-group" style={{ marginBottom: "1rem" }}>
-                  <label htmlFor="recruit-department">学部・学科（専攻課程）{requiredMark}</label>
-                  <input
-                    id="recruit-department"
-                    type="text"
-                    value={department}
-                    onChange={(e) => setDepartment(e.target.value)}
-                    maxLength={100}
-                    placeholder="例：音楽学部 器楽科"
-                    style={{ width: "100%" }}
-                  />
-                  {errors.department && <p className="form-error">{errors.department}</p>}
-                </div>
-
-                <div className="form-group" style={{ marginBottom: "1rem" }}>
                   <span>自宅レッスンの可否{requiredMark}</span>
                   <div style={{ display: "flex", gap: "1.5rem", marginTop: "0.4rem" }}>
                     <label style={{ fontWeight: "normal" }}>
@@ -398,82 +364,60 @@ const TeacherRecruit: React.FC = () => {
                 <div className="form-group" style={{ marginBottom: "1rem" }}>
                   <span>希望レッスン形態{requiredMark}</span>
                   <div style={{ display: "flex", gap: "1.5rem", marginTop: "0.4rem" }}>
-                    {LESSON_TYPES.map((type) => (
-                      <label key={type} style={{ fontWeight: "normal" }}>
-                        <input
-                          type="checkbox"
-                          checked={lessonTypes.includes(type)}
-                          onChange={() => toggleLessonType(type)}
-                        />{" "}
-                        {type}
-                      </label>
-                    ))}
+                    {LESSON_TYPES.map((type) => {
+                      const disabled = type === "自宅" && homeLessonDisabled;
+                      return (
+                        <label
+                          key={type}
+                          style={{
+                            fontWeight: "normal",
+                            color: disabled ? "#aaa" : undefined,
+                            cursor: disabled ? "not-allowed" : "pointer",
+                          }}
+                          title={
+                            disabled
+                              ? "自宅レッスンを「不可」にしているため選択できません"
+                              : undefined
+                          }
+                        >
+                          <input
+                            type="checkbox"
+                            checked={lessonTypes.includes(type)}
+                            onChange={() => toggleLessonType(type)}
+                            disabled={disabled}
+                          />{" "}
+                          {type}
+                        </label>
+                      );
+                    })}
                   </div>
                   {errors.lessonTypes && <p className="form-error">{errors.lessonTypes}</p>}
                 </div>
 
                 <div className="form-group" style={{ marginBottom: "1rem" }}>
-                  <span>
-                    出張可能エリア
+                  <label htmlFor="recruit-travel-range">
+                    出張可能な範囲
                     {wantsTravelLesson && requiredMark}
-                  </span>
+                  </label>
                   <p style={{ fontSize: "0.85rem", color: "#666", margin: "0.2rem 0 0.4rem" }}>
-                    出張レッスンが可能なエリアを町名まで選んで「追加」してください（複数登録可）。
-                    市区町村内のどこへでも出張できる場合は町名で「（全域）」を選択してください。
+                    ご自宅を起点に、出張レッスンが可能な範囲の目安を選択してください。
                   </p>
-                  <AddressCascadeSelect
-                    value={areaDraft}
-                    onChange={setAreaDraft}
-                    idPrefix="recruit-area"
-                    allowWholeCity
+                  <select
+                    id="recruit-travel-range"
+                    className="form-input"
+                    value={travelRange}
+                    onChange={(e) => setTravelRange(e.target.value)}
                     disabled={!wantsTravelLesson}
-                  />
-                  <button
-                    type="button"
-                    className="form-button"
-                    onClick={addTravelArea}
-                    disabled={
-                      !wantsTravelLesson ||
-                      !areaDraft.prefecture ||
-                      !areaDraft.city ||
-                      !areaDraft.town ||
-                      travelAreas.length >= MAX_TRAVEL_AREAS
-                    }
-                    style={{ marginTop: "0.5rem" }}
+                    style={{ width: "100%" }}
                   >
-                    エリアを追加
-                  </button>
-                  {travelAreas.length > 0 && (
-                    <ul style={{ listStyle: "none", padding: 0, marginTop: "0.6rem" }}>
-                      {travelAreas.map((area) => (
-                        <li
-                          key={area.label}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            padding: "0.3rem 0",
-                            borderBottom: "1px solid #eee",
-                          }}
-                        >
-                          <span>{area.label}</span>
-                          <button
-                            type="button"
-                            onClick={() => removeTravelArea(area.label)}
-                            style={{
-                              background: "none",
-                              border: "none",
-                              color: "#c0392b",
-                              cursor: "pointer",
-                            }}
-                          >
-                            削除
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {errors.travelAreas && <p className="form-error">{errors.travelAreas}</p>}
+                    <option value="">選択してください</option>
+                    {TRAVEL_RANGES.map((range) => (
+                      <option key={range} value={range}>
+                        {range}
+                      </option>
+                    ))}
+                  </select>
+                  {errors.travelRange && <p className="form-error">{errors.travelRange}</p>}
                 </div>
 
                 <div className="form-group" style={{ marginBottom: "1.5rem" }}>
