@@ -2,6 +2,7 @@
 // ※ Router（BrowserRouter）は main.tsx で全体を包んでいるため、ここでは Routes/Route のみ使用します。
 import { Routes, Route } from "react-router-dom";
 import Header from "./components/Header";
+import ScrollToTop from "./components/ScrollToTop";
 import GeidaiConnect from "./GeidaiConnectUi";
 import Login from "./Login";
 import Register from "./pages/Register";
@@ -40,6 +41,7 @@ import ProtectedRoute from "./ProtectedRoute";
 function App() {
   return (
     <div className="app-container">
+      <ScrollToTop />
       <Header />
 
       <div className="main-content">
