@@ -2443,6 +2443,7 @@ export const submitRequest = https.onCall(
     data: {
       requestType?: string;
       name?: string;
+      furigana?: string;
       email?: string;
       phone?: string;
       organization?: string;
@@ -2458,6 +2459,7 @@ export const submitRequest = https.onCall(
 
     const requestType = str(data?.requestType);
     const name = str(data?.name);
+    const furigana = str(data?.furigana);
     const email = str(data?.email);
     const phone = str(data?.phone);
     const organization = str(data?.organization);
@@ -2467,10 +2469,10 @@ export const submitRequest = https.onCall(
     const genre = str(data?.genre);
     const message = str(data?.message);
 
-    if (!requestType || !name || !email || !message) {
+    if (!requestType || !name || !furigana || !email || !phone || !message) {
       throw new https.HttpsError(
         "invalid-argument",
-        "依頼の種類・お名前・メールアドレス・依頼内容をすべて入力してください。"
+        "依頼の種類・お名前・ふりがな・メールアドレス・電話番号・依頼内容をすべて入力してください。"
       );
     }
 
@@ -2484,6 +2486,7 @@ export const submitRequest = https.onCall(
     // App Check 未導入のため、スパム対策は入力検証のみ（submitContact と同方針）
     if (
       name.length > 100 ||
+      furigana.length > 100 ||
       phone.length > 30 ||
       organization.length > 200 ||
       eventDate.length > 100 ||
@@ -2508,6 +2511,7 @@ export const submitRequest = https.onCall(
     const docRef = await admin.firestore().collection("requests").add({
       requestType,
       name,
+      furigana,
       email,
       phone,
       organization,
@@ -2538,8 +2542,9 @@ export const submitRequest = https.onCall(
         rows: [
           ["依頼の種類", requestType],
           ["お名前", name],
+          ["ふりがな", furigana],
           ["メールアドレス", email],
-          ["電話番号", phone || "未入力"],
+          ["電話番号", phone],
           ["会社・団体名", organization || "未入力"],
           ["希望日・時期", eventDate || "未定"],
           ["開催場所", venue || "未定"],

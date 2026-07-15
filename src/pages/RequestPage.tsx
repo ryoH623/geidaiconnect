@@ -1,11 +1,10 @@
 // src/pages/RequestPage.tsx
 // 演奏・展示などの依頼フォーム。callable（submitRequest）経由で Firestore 保存＋運営宛メール送信。
 // 一般のお問い合わせ（Contact.tsx）とは分離し、依頼に必要な項目を構造化して受け付ける。
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase";
-import { useAuth } from "../contexts/AuthContext";
 import "../index.css";
 
 const REQUEST_TYPES = [
@@ -15,11 +14,13 @@ const REQUEST_TYPES = [
   "その他",
 ] as const;
 
-const RequestPage: React.FC = () => {
-  const { user } = useAuth();
+// 必須項目に付ける赤いマーク
+const requiredMark = <span className="required-label">必須</span>;
 
+const RequestPage: React.FC = () => {
   const [requestType, setRequestType] = useState("");
   const [name, setName] = useState("");
+  const [furigana, setFurigana] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [organization, setOrganization] = useState("");
@@ -32,13 +33,6 @@ const RequestPage: React.FC = () => {
   const [sent, setSent] = useState(false);
   const [error, setError] = useState("");
 
-  // ログイン中は氏名・メールを初期値として自動入力する
-  useEffect(() => {
-    if (!user) return;
-    setName((prev) => prev || user.displayName || "");
-    setEmail((prev) => prev || user.email || "");
-  }, [user]);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -49,8 +43,9 @@ const RequestPage: React.FC = () => {
         {
           requestType: string;
           name: string;
+          furigana: string;
           email: string;
-          phone?: string;
+          phone: string;
           organization?: string;
           eventDate?: string;
           venue?: string;
@@ -64,8 +59,9 @@ const RequestPage: React.FC = () => {
       await callable({
         requestType,
         name,
+        furigana,
         email,
-        phone: phone || undefined,
+        phone,
         organization: organization || undefined,
         eventDate: eventDate || undefined,
         venue: venue || undefined,
@@ -110,7 +106,7 @@ const RequestPage: React.FC = () => {
 
                 <form onSubmit={handleSubmit}>
                   <div className="form-group" style={{ marginBottom: "1rem" }}>
-                    <label htmlFor="request-type">依頼の種類（必須）</label>
+                    <label htmlFor="request-type">依頼の種類{requiredMark}</label>
                     <select
                       id="request-type"
                       value={requestType}
@@ -129,7 +125,7 @@ const RequestPage: React.FC = () => {
                   </div>
 
                   <div className="form-group" style={{ marginBottom: "1rem" }}>
-                    <label htmlFor="request-name">お名前（必須）</label>
+                    <label htmlFor="request-name">お名前{requiredMark}</label>
                     <input
                       id="request-name"
                       type="text"
@@ -137,30 +133,49 @@ const RequestPage: React.FC = () => {
                       onChange={(e) => setName(e.target.value)}
                       required
                       maxLength={100}
+                      placeholder="例：藝大 花子"
                       style={{ width: "100%" }}
                     />
                   </div>
 
                   <div className="form-group" style={{ marginBottom: "1rem" }}>
-                    <label htmlFor="request-email">メールアドレス（必須）</label>
+                    <label htmlFor="request-furigana">ふりがな{requiredMark}</label>
+                    <input
+                      id="request-furigana"
+                      type="text"
+                      value={furigana}
+                      onChange={(e) => setFurigana(e.target.value)}
+                      required
+                      maxLength={100}
+                      placeholder="例：げいだい はなこ"
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: "1rem" }}>
+                    <label htmlFor="request-email">メールアドレス{requiredMark}</label>
                     <input
                       id="request-email"
                       type="email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       required
+                      maxLength={200}
+                      placeholder="例：hanako@example.com"
                       style={{ width: "100%" }}
                     />
                   </div>
 
                   <div className="form-group" style={{ marginBottom: "1rem" }}>
-                    <label htmlFor="request-phone">電話番号（任意）</label>
+                    <label htmlFor="request-phone">電話番号{requiredMark}</label>
                     <input
                       id="request-phone"
                       type="tel"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
+                      required
                       maxLength={30}
+                      placeholder="例：09012345678"
                       style={{ width: "100%" }}
                     />
                   </div>
@@ -236,7 +251,7 @@ const RequestPage: React.FC = () => {
                   </div>
 
                   <div className="form-group" style={{ marginBottom: "1rem" }}>
-                    <label htmlFor="request-message">依頼内容（必須）</label>
+                    <label htmlFor="request-message">依頼内容{requiredMark}</label>
                     <textarea
                       id="request-message"
                       value={message}
