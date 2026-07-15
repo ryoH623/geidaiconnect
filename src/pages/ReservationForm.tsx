@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { getAuth } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { doc, getDoc } from 'firebase/firestore';
@@ -10,6 +10,7 @@ import { citiesByPrefecture } from '../data/citiesByPrefecture';
 import type { AvailableStudio } from '../data/studios';
 import { usePrefectureCities, useTownsWithCoords } from '../hooks/useJapaneseAddresses';
 import { db } from '../firebase';
+import { useAuth } from '../contexts/AuthContext';
 import '../index.css';
 
 type FormDataType = {
@@ -62,6 +63,7 @@ const ReservationForm: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const auth = getAuth();
+  const { user: authUser } = useAuth();
 
   const queryParams = new URLSearchParams(location.search);
   const teacherIdFromQuery = decodeURIComponent(queryParams.get('teacherId') || '');
@@ -93,6 +95,11 @@ const ReservationForm: React.FC = () => {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // ご予約者情報は会員情報（users/{uid}）から自動取得する。
+  // 未ログイン→予約不可、プロフィール未完（氏名/フリガナ/メール/電話が欠け）→/profileへ誘導。
+  const [profileChecked, setProfileChecked] = useState(false);
+  const [missingProfileFields, setMissingProfileFields] = useState<string[]>([]);
 
   // スタジオ予約フロー用の state
   const [regionPref, setRegionPref] = useState('');
@@ -127,21 +134,6 @@ const ReservationForm: React.FC = () => {
     noteFromQuery,
     auth,
   ]);
-
-  useEffect(() => {
-    const user = auth.currentUser;
-
-    console.log('ReservationForm: Auth currentUser 確認:', user);
-
-    if (!user) return;
-
-    setFormData((prev) => ({
-      ...prev,
-      name: user.displayName || prev.name,
-      email: user.email || prev.email,
-      phone: user.phoneNumber?.replace(/[^\d]/g, '') || prev.phone,
-    }));
-  }, [auth]);
 
   useEffect(() => {
     try {
@@ -293,29 +285,50 @@ const ReservationForm: React.FC = () => {
     return base + studio;
   }, [lessonAmount, isStudioFlow, selectedStudio]);
 
-  // 生徒プロフィールの住所から地域の初期値をセット
+  // 会員情報（users/{uid}）からご予約者情報（氏名・フリガナ・メール・電話）と
+  // 地域の初期値を取得する。予約フォームでは再入力させず、これらを自動で使う。
   useEffect(() => {
-    const user = auth.currentUser;
-    if (!user) return;
+    if (!authUser) return;
 
     let cancelled = false;
     (async () => {
       try {
-        const snap = await getDoc(doc(db, 'users', user.uid));
-        if (cancelled || !snap.exists()) return;
-        const pref = snap.data()?.prefecture;
+        const snap = await getDoc(doc(db, 'users', authUser.uid));
+        if (cancelled) return;
+
+        const d = snap.exists() ? snap.data() ?? {} : {};
+        const name = `${d.lastName ?? ''}${d.firstName ?? ''}`.trim();
+        const furigana = `${d.lastNameKana ?? ''}${d.firstNameKana ?? ''}`.trim();
+        const email =
+          typeof d.email === 'string' && d.email ? d.email : authUser.email || '';
+        const phone =
+          typeof d.phone === 'string' ? d.phone.replace(/[^\d]/g, '') : '';
+
+        setFormData((prev) => ({ ...prev, name, furigana, email, phone }));
+
+        const pref = d.prefecture;
         if (typeof pref === 'string' && pref) {
           setRegionPref((prev) => prev || pref);
         }
+
+        // プロフィール未完のチェック（欠けている項目名を控える）
+        const missing: string[] = [];
+        if (!name) missing.push('お名前');
+        if (!furigana) missing.push('フリガナ');
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) missing.push('メールアドレス');
+        if (!/^\d{10,11}$/.test(phone)) missing.push('電話番号');
+        setMissingProfileFields(missing);
       } catch (error) {
-        console.warn('生徒プロフィールの地域取得に失敗:', error);
+        console.warn('会員情報の取得に失敗:', error);
+      } finally {
+        if (!cancelled) setProfileChecked(true);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [auth]);
+  }, [authUser]);
 
   useEffect(() => {
     setFormData((prev) => {
@@ -565,6 +578,16 @@ const ReservationForm: React.FC = () => {
       navigate('/login', {
         state: { from: `${location.pathname}${location.search}` },
       });
+      return;
+    }
+
+    // 会員情報の読み込み前／未完のときは確認画面へ進めない
+    if (!profileChecked) {
+      alert('会員情報を読み込み中です。少し待ってから再度お試しください。');
+      return;
+    }
+    if (missingProfileFields.length > 0) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
@@ -1057,56 +1080,47 @@ const ReservationForm: React.FC = () => {
               </div>
             )}
 
-            <div className="form-group">
-              <label>お名前</label>
-              <input
-                type="text"
-                name="name"
-                value={formData.name}
-                onChange={handleChange}
-                className="form-control"
-                autoComplete="name"
-              />
-              {errors.name && <p className="error">{errors.name}</p>}
-            </div>
-
-            <div className="form-group">
-              <label>ふりがな</label>
-              <input
-                type="text"
-                name="furigana"
-                value={formData.furigana}
-                onChange={handleChange}
-                className="form-control"
-              />
-              {errors.furigana && <p className="error">{errors.furigana}</p>}
-            </div>
-
-            <div className="form-group">
-              <label>メールアドレス</label>
-              <input
-                type="email"
-                name="email"
-                value={formData.email}
-                onChange={handleChange}
-                className="form-control"
-                autoComplete="email"
-              />
-              {errors.email && <p className="error">{errors.email}</p>}
-            </div>
-
-            <div className="form-group">
-              <label>電話番号</label>
-              <input
-                type="tel"
-                name="phone"
-                value={formData.phone}
-                onChange={handleChange}
-                className="form-control"
-                autoComplete="tel"
-                inputMode="numeric"
-              />
-              {errors.phone && <p className="error">{errors.phone}</p>}
+            {/* ご予約者情報は会員情報から自動反映。未入力があれば会員情報の入力を促す */}
+            <div
+              className="form-group"
+              style={{
+                border: '1px solid #ddd',
+                borderRadius: 8,
+                padding: '1rem',
+                background: '#fafafa',
+              }}
+            >
+              <label style={{ fontWeight: 'bold' }}>ご予約者情報</label>
+              {!authUser ? (
+                <p style={{ margin: '0.25rem 0 0' }}>
+                  ご予約にはログインが必要です。ログインすると会員情報が自動で反映されます。
+                </p>
+              ) : missingProfileFields.length === 0 ? (
+                <>
+                  <p style={{ fontSize: '0.85rem', color: '#666', margin: '0.25rem 0 0.5rem' }}>
+                    会員情報から自動で反映されます。変更する場合は
+                    <Link to="/profile">会員情報の編集</Link>から行ってください。
+                  </p>
+                  <p style={{ margin: '2px 0' }}>
+                    <strong>お名前：</strong>
+                    {formData.name}（{formData.furigana}）
+                  </p>
+                  <p style={{ margin: '2px 0' }}>
+                    <strong>メール：</strong>
+                    {formData.email}
+                  </p>
+                  <p style={{ margin: '2px 0' }}>
+                    <strong>電話番号：</strong>
+                    {formData.phone}
+                  </p>
+                </>
+              ) : (
+                <p className="error" style={{ margin: '0.25rem 0 0' }}>
+                  会員情報に未入力の項目（{missingProfileFields.join('・')}）があります。
+                  <Link to="/profile">会員情報の編集</Link>
+                  から入力を完了してからご予約ください。
+                </p>
+              )}
             </div>
 
             <div className="form-group">
@@ -1132,7 +1146,11 @@ const ReservationForm: React.FC = () => {
               />
             </div>
 
-            <button type="submit" className="form-button">
+            <button
+              type="submit"
+              className="form-button"
+              disabled={!!authUser && (!profileChecked || missingProfileFields.length > 0)}
+            >
               確認画面へ
             </button>
           </form>
