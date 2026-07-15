@@ -39,7 +39,8 @@ const SCHEDULES_COLLECTION = "schedules";
 const WEEK_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const UNAVAILABLE_STATUSES = new Set(["closed", "reserved", "booked", "pending"]);
 // 予約モードで生徒が予約できる上限（本日から何日先まで）。バックエンドの検証と一致させること。
-const MAX_BOOKING_DAYS_AHEAD = 31;
+// カードの与信は最長30日ホールドのため、締切キャプチャが間に合う30日以内に制限する。
+const MAX_BOOKING_DAYS_AHEAD = 30;
 
 function formatDateKey(date: Date): string {
   const y = date.getFullYear();

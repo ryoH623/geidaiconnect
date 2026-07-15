@@ -669,7 +669,8 @@ const TRAVEL_UNKNOWN_BUFFER_MIN = 60; // 座標不明かつ別拠点の場合の
 const DEFAULT_LESSON_DURATION_MIN = 60; // 所要時間が判定できないときの既定(分)
 
 // 生徒が予約できる上限（本日から何日先まで）。フロント（BookingCalendar）と一致させること。
-const MAX_BOOKING_DAYS_AHEAD = 31;
+// カードの与信は最長30日ホールドのため、締切キャプチャが間に合う30日以内に制限する。
+const MAX_BOOKING_DAYS_AHEAD = 30;
 
 /** レッスンの場所（座標が分かれば座標、分からなくても key で同一拠点かを判定できる） */
 type LessonLoc = { lat?: number; lng?: number; key: string };
