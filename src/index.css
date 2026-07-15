@@ -3941,13 +3941,13 @@ body {
   background: linear-gradient(90deg, transparent, #b89f6b, transparent);
 }
 
-/* モバイルでは見出し（例:「演奏・展示などのご依頼」11文字）が2行に折り返して
-   1文字だけ次行に落ちるのを防ぐため、フォントを縮めてなるべく1行に収める。
-   .about-section.enhanced h2(2rem) より詳細度を上げて上書き。 */
-@media (max-width: 480px) {
-  .about-section.enhanced h2.section-title {
-    font-size: 1.6rem;
-  }
+/* 見出しは端末幅に応じて滑らかに自動スケール（流動フォント）。
+   最小1.65rem・最大2rem、中間は 7vw で追従する。
+   「演奏・展示などのご依頼」(11文字)が現行スマホ幅(360px以上)で1行に収まり、
+   より長い見出しは無理に潰さず自然に折り返す。デスクトップは従来どおり2rem。
+   .about-section.enhanced h2(2rem) より詳細度を上げて上書きしている。 */
+.about-section.enhanced h2.section-title {
+  font-size: clamp(1.65rem, 7vw, 2rem);
 }
 
 .about-section.enhanced .catch-copy {
