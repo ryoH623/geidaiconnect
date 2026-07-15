@@ -3941,6 +3941,15 @@ body {
   background: linear-gradient(90deg, transparent, #b89f6b, transparent);
 }
 
+/* モバイルでは見出し（例:「演奏・展示などのご依頼」11文字）が2行に折り返して
+   1文字だけ次行に落ちるのを防ぐため、フォントを縮めてなるべく1行に収める。
+   .about-section.enhanced h2(2rem) より詳細度を上げて上書き。 */
+@media (max-width: 480px) {
+  .about-section.enhanced h2.section-title {
+    font-size: 1.6rem;
+  }
+}
+
 .about-section.enhanced .catch-copy {
   text-align: center;
   letter-spacing: 0.12em;
