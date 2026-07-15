@@ -668,6 +668,9 @@ const TRAVEL_SLOT_MIN = 30; // 枠粒度(分)。移動バッファはこの単�
 const TRAVEL_UNKNOWN_BUFFER_MIN = 60; // 座標不明かつ別拠点の場合の保守的バッファ(分)
 const DEFAULT_LESSON_DURATION_MIN = 60; // 所要時間が判定できないときの既定(分)
 
+// 生徒が予約できる上限（本日から何日先まで）。フロント（BookingCalendar）と一致させること。
+const MAX_BOOKING_DAYS_AHEAD = 31;
+
 /** レッスンの場所（座標が分かれば座標、分からなくても key で同一拠点かを判定できる） */
 type LessonLoc = { lat?: number; lng?: number; key: string };
 
@@ -1314,6 +1317,16 @@ export const createReservationAndCheckout = https.onCall(
         throw new https.HttpsError(
           "invalid-argument",
           "電話番号が不正です。"
+        );
+      }
+
+      // 予約可能期間チェック（本日〜約1ヶ月先）。過去日・上限超過を拒否する。
+      const minDateStr = todayJst(0);
+      const maxDateStr = todayJst(MAX_BOOKING_DAYS_AHEAD);
+      if (date < minDateStr || date > maxDateStr) {
+        throw new https.HttpsError(
+          "failed-precondition",
+          "ご予約は本日から約1ヶ月以内の日程でお願いします。"
         );
       }
 

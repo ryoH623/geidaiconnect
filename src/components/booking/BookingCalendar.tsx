@@ -38,6 +38,8 @@ type ScheduleSlot = {
 const SCHEDULES_COLLECTION = "schedules";
 const WEEK_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const UNAVAILABLE_STATUSES = new Set(["closed", "reserved", "booked", "pending"]);
+// 予約モードで生徒が予約できる上限（本日から何日先まで）。バックエンドの検証と一致させること。
+const MAX_BOOKING_DAYS_AHEAD = 31;
 
 function formatDateKey(date: Date): string {
   const y = date.getFullYear();
@@ -199,6 +201,26 @@ export default function BookingCalendar({
   const isReservationMode = Boolean(teacherId && onDateTimeSelect);
   const safeDisplayMonth = displayMonth ?? new Date();
   const today = new Date();
+
+  // 予約モードの予約可能上限日（本日から MAX_BOOKING_DAYS_AHEAD 日先まで）
+  const maxBookingDate = useMemo(() => {
+    const d = startOfDay(new Date());
+    d.setDate(d.getDate() + MAX_BOOKING_DAYS_AHEAD);
+    return d;
+  }, []);
+
+  // 予約モードでは、現在月より前・上限日を含む月より先へは移動させない
+  const displayMonthFirst = startOfDay(
+    new Date(safeDisplayMonth.getFullYear(), safeDisplayMonth.getMonth(), 1)
+  );
+  const currentMonthFirst = startOfDay(
+    new Date(today.getFullYear(), today.getMonth(), 1)
+  );
+  const nextMonthFirst = startOfDay(
+    new Date(safeDisplayMonth.getFullYear(), safeDisplayMonth.getMonth() + 1, 1)
+  );
+  const canGoPrevMonth = !isReservationMode || displayMonthFirst > currentMonthFirst;
+  const canGoNextMonth = !isReservationMode || nextMonthFirst <= maxBookingDate;
 
   const [reservationSlots, setReservationSlots] = useState<ScheduleSlot[]>([]);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
@@ -536,7 +558,7 @@ export default function BookingCalendar({
           type="button"
           className="form-button schedule-sub-button"
           onClick={handlePrevMonth}
-          disabled={!onChangeMonth}
+          disabled={!onChangeMonth || !canGoPrevMonth}
         >
           前の月
         </button>
@@ -547,7 +569,7 @@ export default function BookingCalendar({
           type="button"
           className="form-button schedule-sub-button"
           onClick={handleNextMonth}
-          disabled={!onChangeMonth}
+          disabled={!onChangeMonth || !canGoNextMonth}
         >
           次の月
         </button>
@@ -585,6 +607,8 @@ export default function BookingCalendar({
 
           const isToday = isSameDate(date, today);
           const isPast = isPastDate(date);
+          // 予約モードでは上限日より先は選べない
+          const isBeyondMax = isReservationMode && startOfDay(date) > maxBookingDate;
           const holidayName = getHolidayName(date);
           const isHoliday = holidayName !== "";
           const isSunday = date.getDay() === 0;
@@ -597,13 +621,13 @@ export default function BookingCalendar({
               : "";
 
           const isDisabled = isReservationMode
-            ? isPast || !isCurrentMonth || !isReservationAvailable
+            ? isPast || !isCurrentMonth || !isReservationAvailable || isBeyondMax
             : isPast || !isCurrentMonth || !onToggleDate;
 
           const className = [
             "schedule-date-button",
             isSelected ? "is-selected" : "",
-            isPast || !isCurrentMonth ? "is-past" : "",
+            isPast || !isCurrentMonth || isBeyondMax ? "is-past" : "",
             isToday ? "is-today" : "",
             isRegistered ? "has-registered" : "",
             isSunday ? "is-sunday" : "",
@@ -668,6 +692,9 @@ export default function BookingCalendar({
 
           {!isLoadingSlots && !reservationError && (
             <>
+              <p className="schedule-helper-text" style={{ color: "#888" }}>
+                ※ ご予約は本日から約1ヶ月以内の日程で承っています。
+              </p>
               <p className="schedule-helper-text">
                 {selectedReservationDate
                   ? `${selectedReservationDate} の空き時間を選択してください。`
