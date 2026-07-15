@@ -423,6 +423,8 @@ type CreateReservationAndCheckoutData = {
   phone: string;
   location: string;
   notes?: string;
+  // 支払い方法。card=与信→締切キャプチャ、paypay=即時決済
+  paymentMethod?: "card" | "paypay";
   // レッスン種別（自宅/スタジオ/出張）。移動バッファ判定の場所種別に使う
   lessonType?: string;
   // レッスン所要時間(分)。未指定時は lessonCourse タイトルから推定
@@ -671,6 +673,17 @@ const DEFAULT_LESSON_DURATION_MIN = 60; // 所要時間が判定できないと�
 // 生徒が予約できる上限（本日から何日先まで）。フロント（BookingCalendar）と一致させること。
 // カードの与信は最長30日ホールドのため、締切キャプチャが間に合う30日以内に制限する。
 const MAX_BOOKING_DAYS_AHEAD = 30;
+
+/**
+ * カード与信の締切キャプチャ予定時刻。
+ * キャンセル締切＝レッスン前日23:59 のため、その直後＝レッスン当日 00:00(JST) を請求予定とする。
+ * lessonDate は "YYYY-MM-DD"。
+ */
+function chargeDueTimestamp(lessonDate: string): admin.firestore.Timestamp {
+  return admin.firestore.Timestamp.fromDate(
+    new Date(`${lessonDate}T00:00:00+09:00`)
+  );
+}
 
 /** レッスンの場所（座標が分かれば座標、分からなくても key で同一拠点かを判定できる） */
 type LessonLoc = { lat?: number; lng?: number; key: string };
@@ -1278,12 +1291,17 @@ export const createReservationAndCheckout = https.onCall(
         phone,
         location,
         notes = "",
+        paymentMethod: paymentMethodRaw,
         lessonType = "",
         durationMin: durationMinRaw,
         studentLat,
         studentLng,
         studioId = "",
       } = data || ({} as CreateReservationAndCheckoutData);
+
+      // 支払い方法（既定はカード）。card=与信→締切キャプチャ、paypay=即時決済
+      const paymentMethod: "card" | "paypay" =
+        paymentMethodRaw === "paypay" ? "paypay" : "card";
 
       if (
         !teacherId ||
@@ -1622,6 +1640,9 @@ export const createReservationAndCheckout = https.onCall(
           studioFee: studioId ? studioFee : null,
           studioBookingDocId: studioBookingDocId || null,
           totalAmount,
+          // 支払い方法と、カード与信の締切キャプチャ予定時刻
+          paymentMethod,
+          chargeDueAt: chargeDueTimestamp(date),
           paymentStatus: "pending_payment",
           reservationStatus: "pending",
           paymentProvider: "stripe",
@@ -1676,9 +1697,12 @@ export const createReservationAndCheckout = https.onCall(
         });
       }
 
-      const session = await stripe.checkout.sessions.create({
+      // 支払い方法別にセッションを作る（カードとPayPayは capture 方式が異なり同居できない）。
+      // カード: 与信のみ（capture_method=manual）→ 締切日にキャプチャ。
+      // PayPay: 即時決済（automatic capture）。
+      const sessionParams: any = {
         mode: "payment",
-        payment_method_types: ["card", "paypay"],
+        payment_method_types: paymentMethod === "paypay" ? ["paypay"] : ["card"],
         line_items: lineItems,
         success_url: successUrl,
         cancel_url: cancelUrl,
@@ -1696,9 +1720,17 @@ export const createReservationAndCheckout = https.onCall(
           userId,
           studentName: name,
           studentEmail: email,
+          paymentMethod,
         },
         expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
-      });
+      };
+
+      if (paymentMethod === "card") {
+        // 与信のみ確保し、締切日に captureDueAuthorizations がキャプチャする
+        sessionParams.payment_intent_data = { capture_method: "manual" };
+      }
+
+      const session = await stripe.checkout.sessions.create(sessionParams);
 
       await reservationRef.set(
         {
@@ -2006,26 +2038,43 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
       const isFirstPaid = await admin
         .firestore()
         .runTransaction(async (tx) => {
-        // Stripe のイベント再送でメールが重複しないよう、
-        // pending → paid の初回遷移かどうかをトランザクション内で判定する
+        // Stripe のイベント再送でメールが重複しないよう、初回遷移かどうかを判定する。
+        // カード(manual capture)は Checkout 完了時点では「与信(authorized)」であり、
+        // 実際の請求(paid)は締切日の captureDueAuthorizations で確定する。
+        // PayPay(即時)は Checkout 完了＝paid。
         const prevSnap = await tx.get(reservationRef);
         const prev = prevSnap.exists ? prevSnap.data() || {} : {};
-        const firstPaid = prev.paymentStatus !== "paid";
+        const isCardAuth = prev.paymentMethod === "card";
+        const alreadyFinal =
+          prev.paymentStatus === "paid" || prev.paymentStatus === "authorized";
+        // 決済確定メールは PayPay(即時paid)の初回のみ。カードは capture 時に送る。
+        const shouldSendPaidEmail = !alreadyFinal && !isCardAuth;
+
+        const stripePaymentIntentId =
+          typeof session.payment_intent === "string"
+            ? session.payment_intent
+            : null;
 
         tx.set(
           reservationRef,
-          {
-            paymentStatus: "paid",
-            reservationStatus: "confirmed",
-            paymentProvider: "stripe",
-            stripeSessionId: session.id,
-            stripePaymentIntentId:
-              typeof session.payment_intent === "string"
-                ? session.payment_intent
-                : null,
-            paidAt: admin.firestore.FieldValue.serverTimestamp(),
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          },
+          isCardAuth
+            ? {
+                paymentStatus: "authorized",
+                reservationStatus: "confirmed",
+                paymentProvider: "stripe",
+                stripeSessionId: session.id,
+                stripePaymentIntentId,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              }
+            : {
+                paymentStatus: "paid",
+                reservationStatus: "confirmed",
+                paymentProvider: "stripe",
+                stripeSessionId: session.id,
+                stripePaymentIntentId,
+                paidAt: admin.firestore.FieldValue.serverTimestamp(),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              },
           { merge: true }
         );
 
@@ -2070,17 +2119,17 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
           );
         }
 
-        return firstPaid;
+        return shouldSendPaidEmail;
       });
 
-      logger.info("stripeWebhook: reservation marked as paid", {
+      logger.info("stripeWebhook: checkout.session.completed 処理", {
         reservationId,
         sessionId: session.id,
         scheduleDocId,
-        isFirstPaid,
+        sendPaidEmail: isFirstPaid,
       });
 
-      // 決済確定メール（初回の paid 遷移時のみ。失敗しても 200 を返す）
+      // 決済確定メール（PayPay即時paidの初回のみ。カードは capture 時に送る）
       if (isFirstPaid) {
         await sendPaymentCompletedEmails(reservationId);
       }
@@ -2378,7 +2427,118 @@ export const releaseExpiredHolds = pubsub
   });
 
 // ========================================
-// Callable: 予約キャンセル（レッスン前日まで全額返金）
+// Scheduled: カード与信の締切キャプチャ（authorized → paid）
+// キャンセル締切（レッスン前日23:59）を過ぎたカード予約を確定請求する。
+// ========================================
+export const captureDueAuthorizations = pubsub
+  .schedule("every 15 minutes")
+  .timeZone("Asia/Tokyo")
+  .onRun(async () => {
+    const now = admin.firestore.Timestamp.now();
+    const stripe = getStripeClient();
+    const counts = { captured: 0, failed: 0 };
+
+    const snap = await admin
+      .firestore()
+      .collection("reservations")
+      .where("paymentStatus", "==", "authorized")
+      .limit(200)
+      .get();
+
+    for (const doc of snap.docs) {
+      const r = doc.data() || {};
+      const due = r.chargeDueAt;
+      // 締切（chargeDueAt）を過ぎたものだけ請求する
+      if (
+        !(due instanceof admin.firestore.Timestamp) ||
+        due.toMillis() > now.toMillis()
+      ) {
+        continue;
+      }
+
+      const paymentIntentId =
+        typeof r.stripePaymentIntentId === "string" ? r.stripePaymentIntentId : "";
+      if (!paymentIntentId) {
+        logger.error("captureDueAuthorizations: PaymentIntent がありません", {
+          reservationId: doc.id,
+        });
+        continue;
+      }
+
+      // Stripe でキャプチャ（確定）。既にキャプチャ済みなら成功扱い。
+      let ok = false;
+      try {
+        await stripe.paymentIntents.capture(paymentIntentId);
+        ok = true;
+      } catch (error: any) {
+        try {
+          const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+          if (intent.status === "succeeded") ok = true;
+        } catch {
+          /* retrieve 失敗は失敗として扱う */
+        }
+        if (!ok) {
+          logger.error("captureDueAuthorizations: capture 失敗", {
+            reservationId: doc.id,
+            paymentIntentId,
+            error,
+          });
+        }
+      }
+
+      // Firestore を冪等に更新（authorized のときのみ遷移）
+      let transitionedToPaid = false;
+      try {
+        await admin.firestore().runTransaction(async (tx) => {
+          const fresh = await tx.get(doc.ref);
+          if (!fresh.exists) return;
+          if ((fresh.data() || {}).paymentStatus !== "authorized") return;
+
+          if (ok) {
+            tx.set(
+              doc.ref,
+              {
+                paymentStatus: "paid",
+                paidAt: admin.firestore.FieldValue.serverTimestamp(),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              },
+              { merge: true }
+            );
+            transitionedToPaid = true;
+          } else {
+            // TODO(Phase C): 決済失敗リカバリ（生徒への再決済案内・自動キャンセル）
+            tx.set(
+              doc.ref,
+              {
+                paymentStatus: "payment_failed",
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              },
+              { merge: true }
+            );
+          }
+        });
+      } catch (error) {
+        logger.error("captureDueAuthorizations: Firestore 更新に失敗", {
+          reservationId: doc.id,
+          error,
+        });
+        continue;
+      }
+
+      if (transitionedToPaid) {
+        counts.captured += 1;
+        // 決済確定メール（capture 成功時）
+        await sendPaymentCompletedEmails(doc.id);
+      } else if (!ok) {
+        counts.failed += 1;
+      }
+    }
+
+    logger.info("captureDueAuthorizations done", counts);
+  });
+
+// ========================================
+// Callable: 予約キャンセル（レッスン前日まで。カード=与信取消／PayPay=返金）
 // ========================================
 export const cancelReservation = https.onCall(
   async (
@@ -2418,7 +2578,12 @@ export const cancelReservation = https.onCall(
       );
     }
 
-    if (r.reservationStatus !== "confirmed" || r.paymentStatus !== "paid") {
+    // paid(即時決済済み) / authorized(カード与信のみ・未請求) のいずれもキャンセル可
+    const cancellablePaymentStatuses = new Set(["paid", "authorized"]);
+    if (
+      r.reservationStatus !== "confirmed" ||
+      !cancellablePaymentStatuses.has(r.paymentStatus)
+    ) {
       throw new https.HttpsError(
         "failed-precondition",
         "この予約はキャンセルできません（未決済・キャンセル済み・期限切れのいずれか）。"
@@ -2445,33 +2610,43 @@ export const cancelReservation = https.onCall(
       });
       throw new https.HttpsError(
         "internal",
-        "決済情報が見つからないため自動返金できません。お問い合わせください。"
+        "決済情報が見つからないため処理できません。お問い合わせください。"
       );
     }
+
+    const isAuthorizedOnly = r.paymentStatus === "authorized";
 
     logger.info("cancelReservation start", {
       reservationId,
       uid: context.auth.uid,
       lessonDate,
       paymentIntentId,
+      paymentStatus: r.paymentStatus,
     });
 
-    // Stripe 全額返金（失敗したら Firestore は変更しないまま中断）。
-    // 二重実行は Stripe 側が charge_already_refunded で拒否する
+    // カード与信のみ(authorized)＝請求前なので与信取消（返金・手数料なし）。
+    // paid(PayPay即時など)＝全額返金。いずれも失敗したら Firestore は変更しない。
     const stripe = getStripeClient();
-    let refund: any;
+    let refundId: string | null = null;
     try {
-      refund = await stripe.refunds.create({
-        payment_intent: paymentIntentId,
-      });
+      if (isAuthorizedOnly) {
+        await stripe.paymentIntents.cancel(paymentIntentId);
+      } else {
+        // 二重実行は Stripe 側が charge_already_refunded で拒否する
+        const refund = await stripe.refunds.create({
+          payment_intent: paymentIntentId,
+        });
+        refundId = refund?.id ?? null;
+      }
     } catch (error: any) {
-      logger.error("cancelReservation: refund failed", {
+      logger.error("cancelReservation: 与信取消/返金に失敗", {
         reservationId,
+        isAuthorizedOnly,
         error,
       });
       throw new https.HttpsError(
         "internal",
-        "返金処理に失敗しました。時間をおいて再度お試しいただくか、お問い合わせください。"
+        "キャンセル処理に失敗しました。時間をおいて再度お試しいただくか、お問い合わせください。"
       );
     }
 
@@ -2520,8 +2695,9 @@ export const cancelReservation = https.onCall(
           reservationRef,
           {
             reservationStatus: "cancelled",
-            paymentStatus: "refunded",
-            refundId: refund?.id ?? null,
+            // 与信取消は未請求のため voided、返金は refunded
+            paymentStatus: isAuthorizedOnly ? "voided" : "refunded",
+            refundId,
             cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           },
@@ -2557,20 +2733,21 @@ export const cancelReservation = https.onCall(
         }
       });
     } catch (error) {
-      // 返金は完了しているが Firestore 未反映 = 要手動対応
+      // Stripe 側（与信取消/返金）は完了しているが Firestore 未反映 = 要手動対応
       logger.error(
-        "cancelReservation: 返金成功後の Firestore 更新に失敗（要手動対応）",
-        { reservationId, refundId: refund?.id ?? null, error }
+        "cancelReservation: Stripe 処理後の Firestore 更新に失敗（要手動対応）",
+        { reservationId, refundId, isAuthorizedOnly, error }
       );
       throw new https.HttpsError(
         "internal",
-        "返金は完了しましたが予約情報の更新に失敗しました。お手数ですがお問い合わせください。"
+        "キャンセルは完了しましたが予約情報の更新に失敗しました。お手数ですがお問い合わせください。"
       );
     }
 
     logger.info("cancelReservation success", {
       reservationId,
-      refundId: refund?.id ?? null,
+      refundId,
+      isAuthorizedOnly,
     });
 
     // 通知メール（失敗してもキャンセル自体は成功として返す）
@@ -2578,13 +2755,20 @@ export const cancelReservation = https.onCall(
     if (studentEmail) {
       await sendMailSafe({
         to: studentEmail,
-        subject: "【Geidai Connect】ご予約をキャンセルしました（全額返金）",
+        subject: isAuthorizedOnly
+          ? "【Geidai Connect】ご予約をキャンセルしました"
+          : "【Geidai Connect】ご予約をキャンセルしました（全額返金）",
         html: buildInfoMailHtml({
           greetingName: String(r.name || "ご利用者"),
-          intro: [
-            "以下のご予約のキャンセルを受け付け、全額返金の手続きを行いました。",
-            "返金の反映時期はカード会社等によって異なります。",
-          ],
+          intro: isAuthorizedOnly
+            ? [
+                "以下のご予約のキャンセルを受け付けました。",
+                "お支払い前のキャンセルのため、請求は発生しません。",
+              ]
+            : [
+                "以下のご予約のキャンセルを受け付け、全額返金の手続きを行いました。",
+                "返金の反映時期はカード会社等によって異なります。",
+              ],
           rows: reservationRows(r),
           outro: ["またのご利用をお待ちしております。"],
         }),
@@ -2613,7 +2797,9 @@ export const cancelReservation = https.onCall(
 
     return {
       ok: true,
-      message: "予約をキャンセルし、全額返金の手続きを行いました。",
+      message: isAuthorizedOnly
+        ? "予約をキャンセルしました。お支払い前のため請求は発生しません。"
+        : "予約をキャンセルし、全額返金の手続きを行いました。",
     };
   }
 );
