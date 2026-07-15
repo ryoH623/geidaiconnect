@@ -42,6 +42,8 @@ type CreateReservationAndCheckoutPayload = {
   phone: string;
   location: string;
   notes?: string;
+  lessonType?: string;
+  durationMin?: number;
   studioId?: string;
   studioName?: string;
   studioFee?: number;
@@ -240,6 +242,14 @@ const ReservationForm: React.FC = () => {
     return value;
   }, [lessonTypeFromQuery, selectedTeacherCourse]);
 
+  // レッスン所要時間(分)。コース名（例:「出張レッスン（60分）」）から推定。既定60分。
+  const lessonDurationMin = useMemo(() => {
+    const source = lessonCourse || selectedTeacherCourse?.title || '';
+    const m = source.match(/(\d+)\s*分/);
+    const v = m ? Number(m[1]) : NaN;
+    return Number.isFinite(v) && v > 0 ? v : 60;
+  }, [lessonCourse, selectedTeacherCourse]);
+
   const displayLocationHint = useMemo(() => {
     const value = locationDisplayFromQuery || selectedTeacherCourse?.locationDisplay || '';
 
@@ -427,6 +437,7 @@ const ReservationForm: React.FC = () => {
           city?: string;
           studentLat?: number;
           studentLng?: number;
+          durationMin?: number;
         },
         GetAvailableStudiosResult
       >(functions, 'getAvailableStudios');
@@ -446,6 +457,7 @@ const ReservationForm: React.FC = () => {
         time: selectedTime,
         prefecture: regionPref,
         city: regionCity || undefined,
+        durationMin: lessonDurationMin,
         ...(hasTownCoords
           ? {
               studentLat: selectedTownCoords.lat as number,
@@ -655,6 +667,8 @@ const ReservationForm: React.FC = () => {
         phone: formData.phone,
         location: formData.location,
         notes: formData.notes,
+        lessonType: displayLessonType || undefined,
+        durationMin: lessonDurationMin,
         ...(isStudioFlow && selectedStudio
           ? {
               studioId: selectedStudio.id,

@@ -423,6 +423,13 @@ type CreateReservationAndCheckoutData = {
   phone: string;
   location: string;
   notes?: string;
+  // レッスン種別（自宅/スタジオ/出張）。移動バッファ判定の場所種別に使う
+  lessonType?: string;
+  // レッスン所要時間(分)。未指定時は lessonCourse タイトルから推定
+  durationMin?: number;
+  // 出張レッスン時の生徒宅の座標（任意）。移動バッファ判定に使う
+  studentLat?: number;
+  studentLng?: number;
   // スタジオ予約時のみ。料金はサーバ側で studios から再取得するため studioFee は参考値
   studioId?: string;
   studioName?: string;
@@ -610,6 +617,8 @@ type GetAvailableStudiosData = {
   /** 生徒が選択した町名の座標（任意）。指定時は生徒からの近い順に並べ替える */
   studentLat?: number;
   studentLng?: number;
+  /** レッスン所要時間(分)。移動バッファ判定に使う。未指定時は既定値 */
+  durationMin?: number;
 };
 
 type AvailableStudioItem = {
@@ -643,6 +652,161 @@ type GetAvailableStudiosResult = {
 
 function addMinutesToDate(date: Date, minutes: number): Date {
   return new Date(date.getTime() + minutes * 60 * 1000);
+}
+
+// ========================================
+// 移動バッファ（連続予約間に確保する移動時間）ユーティリティ
+// ※ 直線距離ベースの近似。将来 Google Distance Matrix 等の実所要時間へ差し替える場合は
+//    travelBufferMin() の距離→時間の部分だけ置き換えればよい。
+// ========================================
+
+/** 移動バッファ算出パラメータ（運用に応じて調整可能） */
+const TRAVEL_AVG_SPEED_KMH = 20; // 平均移動速度(km/h)。都市部の徒歩/公共交通/車混在を保守的に想定
+const TRAVEL_DETOUR_FACTOR = 1.3; // 直線距離→実移動距離の迂回係数
+const TRAVEL_PREP_MIN = 10; // 準備・片付けの固定バッファ(分)
+const TRAVEL_SLOT_MIN = 30; // 枠粒度(分)。移動バッファはこの単位に切り上げる
+const TRAVEL_UNKNOWN_BUFFER_MIN = 60; // 座標不明かつ別拠点の場合の保守的バッファ(分)
+const DEFAULT_LESSON_DURATION_MIN = 60; // 所要時間が判定できないときの既定(分)
+
+/** レッスンの場所（座標が分かれば座標、分からなくても key で同一拠点かを判定できる） */
+type LessonLoc = { lat?: number; lng?: number; key: string };
+
+/** コースタイトル（例:「出張レッスン（60分）」）から所要時間(分)を推定 */
+function parseLessonDurationMin(courseTitle: unknown): number {
+  const m = String(courseTitle ?? "").match(/(\d+)\s*分/);
+  const v = m ? Number(m[1]) : NaN;
+  return Number.isFinite(v) && v > 0 ? v : DEFAULT_LESSON_DURATION_MIN;
+}
+
+/** "HH:MM" を 0時からの分に変換（不正なら NaN） */
+function timeToMin(time: unknown): number {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(time ?? "").trim());
+  if (!m) return NaN;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+/**
+ * 2 つのレッスン場所の間に必要な移動バッファ(分)。
+ * - 同一拠点（同じ key）: 0（例:同じスタジオの連続予約は移動不要）
+ * - 双方の座標あり: 距離×迂回係数÷速度＋準備時間を枠単位に切り上げ
+ * - 座標不明で別拠点: 保守的な固定バッファ
+ */
+function travelBufferMin(a: LessonLoc, b: LessonLoc): number {
+  if (a.key && b.key && a.key === b.key) return 0;
+
+  const aok = typeof a.lat === "number" && typeof a.lng === "number";
+  const bok = typeof b.lat === "number" && typeof b.lng === "number";
+  if (aok && bok) {
+    const km =
+      haversineKm(a.lat as number, a.lng as number, b.lat as number, b.lng as number) *
+      TRAVEL_DETOUR_FACTOR;
+    const minutes = (km / TRAVEL_AVG_SPEED_KMH) * 60 + TRAVEL_PREP_MIN;
+    return Math.ceil(minutes / TRAVEL_SLOT_MIN) * TRAVEL_SLOT_MIN;
+  }
+  return TRAVEL_UNKNOWN_BUFFER_MIN;
+}
+
+/** 予約の占有ステータス判定に使う「無効（占有しない）」ステータス */
+const INACTIVE_RESERVATION_STATUSES = new Set([
+  "expired",
+  "cancelled",
+  "canceled",
+  "failed",
+  "refunded",
+]);
+
+/** 既存予約1件を移動判定用の {開始,終了,場所} に変換（不正な時刻は null） */
+type DayBooking = { start: number; end: number; loc: LessonLoc };
+function reservationToDayBooking(r: FirebaseFirestore.DocumentData): DayBooking | null {
+  const start = timeToMin(r.lessonTime);
+  if (!Number.isFinite(start)) return null;
+  const dur =
+    typeof r.durationMin === "number" && r.durationMin > 0
+      ? r.durationMin
+      : parseLessonDurationMin(r.lessonCourse);
+
+  const key =
+    typeof r.locationKey === "string" && r.locationKey
+      ? r.locationKey
+      : r.studioId
+        ? `studio:${r.studioId}`
+        : r.lessonType === "自宅"
+          ? `base:${r.teacherId}`
+          : r.lessonType === "出張"
+            ? `home:${r.userId}`
+            : `loc:${String(r.location ?? "")}`;
+
+  const lat = typeof r.lessonLat === "number" ? r.lessonLat : undefined;
+  const lng = typeof r.lessonLng === "number" ? r.lessonLng : undefined;
+
+  return { start, end: start + dur, loc: { lat, lng, key } };
+}
+
+/**
+ * 候補レッスンが既存予約群と両立するか判定。
+ * - 時間帯が重なる → overlap
+ * - 直前/直後の予約との間に移動時間が足りない → travel（必要バッファ分を返す）
+ * 問題なければ null。
+ */
+function findScheduleConflict(
+  cand: DayBooking,
+  existing: DayBooking[]
+): { type: "overlap" } | { type: "travel"; neededMin: number } | null {
+  for (const b of existing) {
+    // 時間帯の重なり
+    if (cand.start < b.end && b.start < cand.end) {
+      return { type: "overlap" };
+    }
+    if (b.end <= cand.start) {
+      // b が前 → b終了 + 移動 ≤ cand開始
+      const buf = travelBufferMin(b.loc, cand.loc);
+      if (cand.start - b.end < buf) return { type: "travel", neededMin: buf };
+    } else {
+      // b が後（b.start >= cand.end）→ cand終了 + 移動 ≤ b開始
+      const buf = travelBufferMin(cand.loc, b.loc);
+      if (b.start - cand.end < buf) return { type: "travel", neededMin: buf };
+    }
+  }
+  return null;
+}
+
+/**
+ * 指定講師・指定日の「占有中」予約一覧を取得（移動判定用）。
+ * 複合インデックスを避けるため lessonDate の単一 where のみで引き、teacherId とステータスは
+ * コード側で絞る。トランザクション内から呼ぶ場合は tx を渡す（読み取りは書き込みより前に）。
+ */
+async function loadTeacherDayBookings(
+  teacherId: string,
+  date: string,
+  opts: {
+    excludeReservationIds?: Set<string>;
+    tx?: FirebaseFirestore.Transaction;
+  } = {}
+): Promise<DayBooking[]> {
+  const query = admin
+    .firestore()
+    .collection("reservations")
+    .where("lessonDate", "==", date);
+  const snap = opts.tx ? await opts.tx.get(query) : await query.get();
+
+  const out: DayBooking[] = [];
+  for (const doc of snap.docs) {
+    if (opts.excludeReservationIds?.has(doc.id)) continue;
+    const r = doc.data() || {};
+    if (r.teacherId !== teacherId) continue;
+    const payment = String(r.paymentStatus ?? "").toLowerCase();
+    const rstatus = String(r.reservationStatus ?? "").toLowerCase();
+    // pending(決済保留)は占有扱い（他者の割り込み防止）。expired/cancelled 等は除外
+    if (
+      INACTIVE_RESERVATION_STATUSES.has(payment) ||
+      INACTIVE_RESERVATION_STATUSES.has(rstatus)
+    ) {
+      continue;
+    }
+    const b = reservationToDayBooking(r);
+    if (b) out.push(b);
+  }
+  return out;
 }
 
 // ========================================
@@ -943,6 +1107,7 @@ export const getAvailableStudios = https.onCall(
       city = "",
       studentLat,
       studentLng,
+      durationMin: durationMinRaw,
     } = data || ({} as GetAvailableStudiosData);
 
     if (!teacherId || !date || !time || !prefecture) {
@@ -975,6 +1140,16 @@ export const getAvailableStudios = https.onCall(
     });
 
     const base = await loadTeacherTravelBase(teacherId);
+
+    // 移動バッファ判定: この日の講師の他予約と、候補レッスンの開始・終了時刻
+    const durationMin =
+      typeof durationMinRaw === "number" && durationMinRaw > 0
+        ? durationMinRaw
+        : DEFAULT_LESSON_DURATION_MIN;
+    const candStart = timeToMin(time);
+    const dayBookings = Number.isFinite(candStart)
+      ? await loadTeacherDayBookings(teacherId, date)
+      : [];
 
     // 地域（都道府県）で一次絞り込み。複合インデックスを避けるため単一 where のみ使い、
     // active / city はコード側でフィルタする
@@ -1025,6 +1200,16 @@ export const getAvailableStudios = https.onCall(
         time
       );
       if (!free) continue;
+
+      // 4) 同日の前後予約から、このスタジオへ移動が間に合うか（間に合わなければ除外）
+      if (Number.isFinite(candStart) && dayBookings.length > 0) {
+        const candBooking: DayBooking = {
+          start: candStart,
+          end: candStart + durationMin,
+          loc: { lat: s.lat, lng: s.lng, key: `studio:${studioId}` },
+        };
+        if (findScheduleConflict(candBooking, dayBookings)) continue;
+      }
 
       // 生徒（選択した町名）からの距離
       const studentDistanceKm = hasStudentCoords
@@ -1089,6 +1274,10 @@ export const createReservationAndCheckout = https.onCall(
         phone,
         location,
         notes = "",
+        lessonType = "",
+        durationMin: durationMinRaw,
+        studentLat,
+        studentLng,
         studioId = "",
       } = data || ({} as CreateReservationAndCheckoutData);
 
@@ -1132,6 +1321,8 @@ export const createReservationAndCheckout = https.onCall(
       let studioFee = 0;
       let resolvedStudioName = "";
       let studioBookingDocId = "";
+      let studioLat: number | undefined;
+      let studioLng: number | undefined;
       if (studioId) {
         const studioSnap = await admin
           .firestore()
@@ -1152,6 +1343,8 @@ export const createReservationAndCheckout = https.onCall(
         resolvedStudioName =
           typeof studio.name === "string" ? studio.name : studioId;
         studioBookingDocId = buildStudioBookingDocId(studioId, date, time);
+        studioLat = typeof studio.lat === "number" ? studio.lat : undefined;
+        studioLng = typeof studio.lng === "number" ? studio.lng : undefined;
 
         // 到達可否の再検証（拠点未設定なら reachable 扱い）
         const base = await loadTeacherTravelBase(teacherId);
@@ -1187,6 +1380,38 @@ export const createReservationAndCheckout = https.onCall(
         typeof context.auth.token.email === "string"
           ? context.auth.token.email
           : null;
+
+      // --- 移動バッファ判定用: 所要時間とレッスン場所（座標つき）を確定する ---
+      const durationMin =
+        typeof durationMinRaw === "number" && durationMinRaw > 0
+          ? durationMinRaw
+          : parseLessonDurationMin(lessonCourse);
+
+      let candidateLoc: LessonLoc;
+      if (studioId) {
+        candidateLoc = { lat: studioLat, lng: studioLng, key: `studio:${studioId}` };
+      } else if (lessonType === "自宅") {
+        // 自宅レッスンは講師の拠点で実施 → 拠点座標
+        const base = await loadTeacherTravelBase(teacherId);
+        candidateLoc = { lat: base.lat, lng: base.lng, key: `base:${teacherId}` };
+      } else if (lessonType === "出張") {
+        // 出張は生徒宅。座標が渡っていれば使い、無ければ座標なし（別生徒宅は保守的バッファ）
+        const hasCoords = isValidStudentCoords(studentLat, studentLng);
+        candidateLoc = {
+          lat: hasCoords ? (studentLat as number) : undefined,
+          lng: hasCoords ? (studentLng as number) : undefined,
+          key: `home:${userId}`,
+        };
+      } else {
+        candidateLoc = { key: `loc:${String(location)}` };
+      }
+
+      const candStart = timeToMin(time);
+      const candBooking: DayBooking = {
+        start: candStart,
+        end: candStart + durationMin,
+        loc: candidateLoc,
+      };
 
       reservationRef = admin.firestore().collection("reservations").doc();
       const reservationId = reservationRef.id;
@@ -1260,6 +1485,36 @@ export const createReservationAndCheckout = https.onCall(
             if (typeof b.pendingReservationId === "string" && b.pendingReservationId) {
               supersededReservationIds.add(b.pendingReservationId);
             }
+          }
+        }
+
+        // 同日の他予約との「時間帯の重なり」と「移動時間の不足」を検証する。
+        // 奪取対象（期限切れ pending）は自分自身との衝突になるため除外。
+        if (Number.isFinite(candStart)) {
+          const excludeIds = new Set(supersededReservationIds);
+          excludeIds.add(reservationId);
+          const dayBookings = await loadTeacherDayBookings(teacherId, date, {
+            tx,
+            excludeReservationIds: excludeIds,
+          });
+          const conflict = findScheduleConflict(candBooking, dayBookings);
+          if (conflict) {
+            logger.info("createReservationAndCheckout schedule conflict", {
+              teacherId,
+              date,
+              time,
+              conflict,
+            });
+            if (conflict.type === "overlap") {
+              throw new https.HttpsError(
+                "already-exists",
+                "この時間帯は講師の他の予約と重複しています。別の時間をお選びください。"
+              );
+            }
+            throw new https.HttpsError(
+              "failed-precondition",
+              "前後の予約との間に移動時間が確保できません。別の時間帯・場所をお選びください。"
+            );
           }
         }
 
@@ -1341,6 +1596,12 @@ export const createReservationAndCheckout = https.onCall(
           phone,
           location,
           notes,
+          // 移動バッファ判定に使う場所・時間情報
+          lessonType: lessonType || null,
+          durationMin,
+          lessonLat: typeof candidateLoc.lat === "number" ? candidateLoc.lat : null,
+          lessonLng: typeof candidateLoc.lng === "number" ? candidateLoc.lng : null,
+          locationKey: candidateLoc.key,
           // スタジオ予約情報（非スタジオ時は null）
           studioId: studioId || null,
           studioName: studioId ? resolvedStudioName : null,
