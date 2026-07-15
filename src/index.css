@@ -1057,6 +1057,19 @@ a[href^="mailto"] {
   white-space: nowrap !important;
 }
 
+/* モバイル: 会員情報フォームは1カラムにして横オーバーフロー（＝フッターが全幅に見えない不具合）を防ぐ。
+   上の 320px + minmax(360px…) 固定2カラムが !important のため、ここでも !important で後勝ち上書きする。 */
+@media (max-width: 640px) {
+  .register-page .form-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .register-page .form-grid input,
+  .register-page .form-grid select {
+    max-width: 100% !important;
+  }
+}
+
 .register-button,
 .register-button:link,
 .register-button:visited,
