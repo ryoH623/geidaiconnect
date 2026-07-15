@@ -1057,16 +1057,43 @@ a[href^="mailto"] {
   white-space: nowrap !important;
 }
 
-/* モバイル: 会員情報フォームは1カラムにして横オーバーフロー（＝フッターが全幅に見えない不具合）を防ぐ。
-   上の 320px + minmax(360px…) 固定2カラムが !important のため、ここでも !important で後勝ち上書きする。 */
+/* モバイル: 会員登録（/register）・会員情報（/profile）フォームの横あふれ
+   （＝ページ全体が右に広がり、全幅フッターだけが画面幅に留まって“半分”に見える不具合）を防ぐ。
+   原因は3点あり、まとめて塞ぐ:
+   1) .register-container が place-items:center のため register-box が中身の最大幅に膨らむ
+      → 単一カラムを minmax(0,1fr) にして親（＝画面）幅に固定する。
+   2) 上の 320px + minmax(360px…) 固定2カラムが !important のため、後勝ちで1カラム化する。
+   3) 長い nowrap ラベルと「利用規約に同意…」チェックボックス文が折り返さず横に伸びる
+      → モバイルでは折り返す。 */
 @media (max-width: 640px) {
+  .register-container {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .register-page .form-grid {
-    grid-template-columns: 1fr !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .register-page .form-grid .split-2 {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .register-page .form-grid .split-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .register-page .form-grid input,
   .register-page .form-grid select {
     max-width: 100% !important;
+    min-width: 0;
+  }
+
+  .register-page .form-grid > label.nowrap {
+    white-space: normal !important;
+  }
+
+  .register-page .checkbox-label {
+    white-space: normal;
   }
 }
 
