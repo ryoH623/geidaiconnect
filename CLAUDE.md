@@ -47,7 +47,8 @@ firebase deploy --only functions   # デプロイ（predeploy で lint と build
 
 - firebase-functions **v1 API**（`firebase-functions/v1`）を使用。リージョンは `us-central1`（フロントの `getFunctions(app, "us-central1")` と一致させること）。
 - 環境変数は `defineString()` パラメータで定義: SMTP_*, APP_URL, STRIPE_SECRET_KEY, STRIPE_SUCCESS_URL, STRIPE_CANCEL_URL, STRIPE_WEBHOOK_SECRET。
-- エクスポート: `sendVerifyEmail`, `resendVerifyEmail`, `createCheckoutSession`, `createReservationAndCheckout`, `getReservationForSuccess`, `stripeWebhook`。
+- エクスポート（onCall/onRequest）: `sendVerifyEmail`, `resendVerifyEmail`, `createCheckoutSession`, `getAvailableStudios`, `createReservationAndCheckout`, `getReservationForSuccess`, `stripeWebhook`, `cancelReservation`, `submitContact`, `submitRequest`, `submitTeacherApplication`, `studioAdminHttp`。
+- スケジュール実行（pubsub）: `sendLessonReminders`（レッスン前リマインド）, `releaseExpiredHolds`（期限切れ pending の枠解放）, `captureDueAuthorizations`（締切を過ぎたカード与信のキャプチャ）。
 
 ### Firestore
 

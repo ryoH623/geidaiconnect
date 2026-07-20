@@ -1,5 +1,6 @@
 // src/App.tsx
 // ※ Router（BrowserRouter）は main.tsx で全体を包んでいるため、ここでは Routes/Route のみ使用します。
+import { lazy, Suspense } from "react";
 import { Routes, Route } from "react-router-dom";
 import Header from "./components/Header";
 import ScrollToTop from "./components/ScrollToTop";
@@ -16,20 +17,9 @@ import Contact from "./pages/Contact";
 import RequestPage from "./pages/RequestPage";
 import TeacherRecruit from "./pages/TeacherRecruit";
 import Terms from "./pages/Terms";
-import ReservationForm from "./pages/ReservationForm";
 import Faq from "./pages/Faq";
-import ScheduleForm from "./pages/teachers/ScheduleForm";
-import ScheduleList from "./pages/teachers/ScheduleList";
-import TeacherReservations from "./pages/teachers/TeacherReservations";
 import RequireAdmin from "./components/RequireAdmin";
-import AdminHome from "./pages/admin/AdminHome";
-import AdminReservations from "./pages/admin/AdminReservations";
-import AdminUsers from "./pages/admin/AdminUsers";
-import AdminReviews from "./pages/admin/AdminReviews";
-import AdminContacts from "./pages/admin/AdminContacts";
-import AdminRequests from "./pages/admin/AdminRequests";
 import RequireTeacher from "./components/RequireTeacher";
-import TestCheckoutPage from "./pages/TestCheckoutPage";
 import PaymentSuccessPage from "./pages/PaymentSuccessPage";
 import PaymentCancelPage from "./pages/PaymentCancelPage";
 import VerifyEmailNotice from "./pages/VerifyEmailNotice";
@@ -38,6 +28,21 @@ import Profile from "./pages/Profile";
 import StudentReservations from "./pages/student/StudentReservations";
 import ProtectedRoute from "./ProtectedRoute";
 
+// 予約フォームと講師・管理画面はバンドルが大きく、初期表示では不要なため遅延読み込みする
+const ReservationForm = lazy(() => import("./pages/ReservationForm"));
+const ScheduleForm = lazy(() => import("./pages/teachers/ScheduleForm"));
+const ScheduleList = lazy(() => import("./pages/teachers/ScheduleList"));
+const TeacherReservations = lazy(
+  () => import("./pages/teachers/TeacherReservations")
+);
+const AdminHome = lazy(() => import("./pages/admin/AdminHome"));
+const AdminReservations = lazy(() => import("./pages/admin/AdminReservations"));
+const AdminUsers = lazy(() => import("./pages/admin/AdminUsers"));
+const AdminReviews = lazy(() => import("./pages/admin/AdminReviews"));
+const AdminContacts = lazy(() => import("./pages/admin/AdminContacts"));
+const AdminRequests = lazy(() => import("./pages/admin/AdminRequests"));
+const TestCheckoutPage = lazy(() => import("./pages/TestCheckoutPage"));
+
 function App() {
   return (
     <div className="app-container">
@@ -45,6 +50,7 @@ function App() {
       <Header />
 
       <div className="main-content">
+        <Suspense fallback={<div style={{ padding: "2rem", textAlign: "center" }}>読み込み中...</div>}>
         <Routes>
           {/* 公開ルート */}
           <Route path="/" element={<GeidaiConnect />} />
@@ -178,6 +184,7 @@ function App() {
             }
           />
         </Routes>
+        </Suspense>
       </div>
 
       <Footer />
