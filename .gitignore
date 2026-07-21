@@ -8,3 +8,4 @@ dist/
 firebase-debug.log
 lib/
 functions/lib/
+*.tsbuildinfo
