@@ -423,8 +423,9 @@ type CreateReservationAndCheckoutData = {
   phone: string;
   location: string;
   notes?: string;
-  // 支払い方法。card=与信→締切キャプチャ、paypay=即時決済
-  paymentMethod?: "card" | "paypay";
+  // 支払い方法。現在はカードのみ（与信→締切キャプチャ）。
+  // フィールド自体は既存データとの互換と将来の手段追加のために残している。
+  paymentMethod?: "card";
   // レッスン種別（自宅/スタジオ/出張）。移動バッファ判定の場所種別に使う
   lessonType?: string;
   // レッスン所要時間(分)。未指定時は lessonCourse タイトルから推定
@@ -1037,7 +1038,7 @@ export const createCheckoutSession = https.onCall(
 
       const session = await stripe.checkout.sessions.create({
         mode: "payment",
-        payment_method_types: ["card", "paypay"],
+        payment_method_types: ["card"],
         line_items: [
           {
             quantity: 1,
@@ -1299,9 +1300,13 @@ export const createReservationAndCheckout = https.onCall(
         studioId = "",
       } = data || ({} as CreateReservationAndCheckoutData);
 
-      // 支払い方法（既定はカード）。card=与信→締切キャプチャ、paypay=即時決済
-      const paymentMethod: "card" | "paypay" =
-        paymentMethodRaw === "paypay" ? "paypay" : "card";
+      // 支払い方法はカードのみ。旧クライアントが paypay を送ってきても card として扱う。
+      const paymentMethod: "card" = "card";
+      if (paymentMethodRaw && paymentMethodRaw !== "card") {
+        logger.warn("非対応の支払い方法が指定されたためカードで処理します", {
+          requested: paymentMethodRaw,
+        });
+      }
 
       if (
         !teacherId ||
@@ -1697,12 +1702,10 @@ export const createReservationAndCheckout = https.onCall(
         });
       }
 
-      // 支払い方法別にセッションを作る（カードとPayPayは capture 方式が異なり同居できない）。
-      // カード: 与信のみ（capture_method=manual）→ 締切日にキャプチャ。
-      // PayPay: 即時決済（automatic capture）。
+      // カードのみ。与信（capture_method=manual）→ キャンセル締切日にキャプチャする。
       const sessionParams: any = {
         mode: "payment",
-        payment_method_types: paymentMethod === "paypay" ? ["paypay"] : ["card"],
+        payment_method_types: ["card"],
         line_items: lineItems,
         success_url: successUrl,
         cancel_url: cancelUrl,
@@ -2041,13 +2044,13 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
         // Stripe のイベント再送でメールが重複しないよう、初回遷移かどうかを判定する。
         // カード(manual capture)は Checkout 完了時点では「与信(authorized)」であり、
         // 実際の請求(paid)は締切日の captureDueAuthorizations で確定する。
-        // PayPay(即時)は Checkout 完了＝paid。
+        // paymentMethod 未設定は PayPay 廃止前・Phase B 以前の予約で、完了時点で paid 扱い。
         const prevSnap = await tx.get(reservationRef);
         const prev = prevSnap.exists ? prevSnap.data() || {} : {};
         const isCardAuth = prev.paymentMethod === "card";
         const alreadyFinal =
           prev.paymentStatus === "paid" || prev.paymentStatus === "authorized";
-        // 決済確定メールは PayPay(即時paid)の初回のみ。カードは capture 時に送る。
+        // カードは capture 時に送るため、ここで送るのは paymentMethod 未設定の旧予約のみ。
         const shouldSendPaidEmail = !alreadyFinal && !isCardAuth;
 
         const stripePaymentIntentId =
@@ -2129,7 +2132,7 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
         sendPaidEmail: isFirstPaid,
       });
 
-      // 決済確定メール（PayPay即時paidの初回のみ。カードは capture 時に送る）
+      // 決済確定メール（paymentMethod 未設定の旧予約のみ。カードは capture 時に送る）
       if (isFirstPaid) {
         await sendPaymentCompletedEmails(reservationId);
       }
@@ -2538,7 +2541,7 @@ export const captureDueAuthorizations = pubsub
   });
 
 // ========================================
-// Callable: 予約キャンセル（レッスン前日まで。カード=与信取消／PayPay=返金）
+// Callable: 予約キャンセル（レッスン前日まで。与信のみなら取消、請求済みなら返金）
 // ========================================
 export const cancelReservation = https.onCall(
   async (
@@ -2625,7 +2628,8 @@ export const cancelReservation = https.onCall(
     });
 
     // カード与信のみ(authorized)＝請求前なので与信取消（返金・手数料なし）。
-    // paid(PayPay即時など)＝全額返金。いずれも失敗したら Firestore は変更しない。
+    // paid＝全額返金。締切前は通常 authorized だが、キャプチャ直後の競合などに備えて残す。
+    // いずれも失敗したら Firestore は変更しない。
     const stripe = getStripeClient();
     let refundId: string | null = null;
     try {
