@@ -1378,6 +1378,62 @@ h3 {
   color: #fff;
 }
 
+/* 予約カレンダーの空き状況マーク（○ 空きあり / △ 残りわずか / × 予約できません）。
+   色だけでなく字形で意味が伝わるようにしている。 */
+.schedule-date-mark {
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1;
+  margin-top: 2px;
+}
+
+.schedule-date-mark.is-open {
+  color: #2e7d5b;
+}
+
+.schedule-date-mark.is-few {
+  color: #b5701a;
+}
+
+.schedule-date-mark.is-full {
+  color: #a89f92;
+}
+
+.schedule-date-button.is-selected .schedule-date-mark {
+  color: #fff;
+}
+
+/* 受付期間内だが予約できない日。is-past の完全なグレーよりわずかに明るくし、
+   「受付対象外」と「予約不可」を見た目で区別する。 */
+.schedule-date-button.is-unavailable {
+  background: #f4f2ee;
+  color: #a09689;
+  border-color: #e4ded3;
+  cursor: not-allowed;
+}
+
+.schedule-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8rem;
+  color: #5b4636;
+}
+
+.schedule-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.schedule-legend-item .schedule-date-mark {
+  margin-top: 0;
+  font-size: 0.9rem;
+}
+
 .schedule-form-layout {
   margin-top: 1rem;
 }
@@ -1866,6 +1922,10 @@ h3 {
 
   .schedule-holiday-label {
     font-size: 0.58rem;
+  }
+
+  .schedule-date-mark {
+    font-size: 0.95rem;
   }
 
   .schedule-month-title {
