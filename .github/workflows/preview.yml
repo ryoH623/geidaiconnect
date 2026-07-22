@@ -1,0 +1,75 @@
+name: Deploy Preview (Firebase Hosting)
+
+# main 以外のブランチへの push でビルド → Firebase Hosting のプレビューチャンネルへ配信。
+# 外出先の iPhone などから、本番に影響を与えずに変更内容を確認するための環境。
+#
+# ・本番（geidaiconnect.com / ConoHa）には一切触れない。本番デプロイは deploy.yml が担当。
+# ・チャンネル名を固定しているため URL は毎回同じ。スマホのブックマークがそのまま使える。
+#   その代わり、複数ブランチを push すると後から push した内容で上書きされる。
+# ・claude/auto-updates は Stop フックで毎回 push されるため除外している。
+on:
+  push:
+    branches-ignore:
+      - main
+      - claude/auto-updates
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-preview
+  cancel-in-progress: true
+
+jobs:
+  build-and-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      - name: Node.js セットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: 依存関係をインストール
+        run: npm ci
+
+      - name: ビルド（Vite）
+        run: npm run build
+        env:
+          # 本番デプロイ（deploy.yml）と同じ値を使う
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          VITE_FIREBASE_MEASUREMENT_ID: ${{ secrets.VITE_FIREBASE_MEASUREMENT_ID }}
+          VITE_EMAILJS_SERVICE_ID: ${{ secrets.VITE_EMAILJS_SERVICE_ID }}
+          VITE_EMAILJS_TEMPLATE_ID: ${{ secrets.VITE_EMAILJS_TEMPLATE_ID }}
+          VITE_EMAILJS_TEMPLATE_ID_TEACHER: ${{ secrets.VITE_EMAILJS_TEMPLATE_ID_TEACHER }}
+          VITE_EMAILJS_PUBLIC_KEY: ${{ secrets.VITE_EMAILJS_PUBLIC_KEY }}
+          VITE_GET_RESERVATION_FOR_SUCCESS_URL: ${{ secrets.VITE_GET_RESERVATION_FOR_SUCCESS_URL }}
+
+      - name: プレビューチャンネルへ配信
+        id: preview
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: geidaiconnect
+          channelId: preview
+          # 更新のたびに期限が延びる。最終 push から30日で自動的に消える。
+          expires: 30d
+
+      - name: 確認用URLをサマリに出す
+        if: always()
+        run: |
+          {
+            echo "## プレビュー環境"
+            echo ""
+            echo "- ブランチ: \`${{ github.ref_name }}\`"
+            echo "- URL: ${{ steps.preview.outputs.details_url }}"
+            echo ""
+            echo "※ 本番（geidaiconnect.com）は更新されていません。"
+          } >> "$GITHUB_STEP_SUMMARY"
