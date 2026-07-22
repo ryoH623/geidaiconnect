@@ -23,6 +23,9 @@ type BookingCalendarProps = {
   // ReservationForm 用
   teacherId?: string;
   onDateTimeSelect?: (date: string, time: string) => void;
+  /** 下書き復元用。初回マウント時だけ選択状態の初期値として使う */
+  initialSelectedDate?: string;
+  initialSelectedTime?: string;
 };
 
 type ScheduleSlot = {
@@ -223,6 +226,8 @@ export default function BookingCalendar({
   onToggleDate,
   teacherId,
   onDateTimeSelect,
+  initialSelectedDate = "",
+  initialSelectedTime = "",
 }: BookingCalendarProps) {
   const isReservationMode = Boolean(teacherId && onDateTimeSelect);
   const safeDisplayMonth = displayMonth ?? new Date();
@@ -252,8 +257,10 @@ export default function BookingCalendar({
   // 満席（枠はあるが全て埋まっている）判定と残り枠数の集計に使う、フィルタ前の全枠
   const [allReservationSlots, setAllReservationSlots] = useState<ScheduleSlot[]>([]);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
-  const [selectedReservationDate, setSelectedReservationDate] = useState("");
-  const [selectedReservationTime, setSelectedReservationTime] = useState("");
+  const [selectedReservationDate, setSelectedReservationDate] =
+    useState(initialSelectedDate);
+  const [selectedReservationTime, setSelectedReservationTime] =
+    useState(initialSelectedTime);
   const [reservationError, setReservationError] = useState("");
 
   useEffect(() => {

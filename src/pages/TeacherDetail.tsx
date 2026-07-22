@@ -1,6 +1,6 @@
 // src/pages/TeacherDetail.tsx
 // 講師詳細ページ（/teachers/:id）。静的データ（src/data/teachers.ts）から表示する。
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { teachers } from "../data/teachers";
 import type { LessonCourse } from "../data/teachers";
@@ -17,9 +17,33 @@ const TeacherDetail: React.FC = () => {
   const { user } = useAuth();
 
   const teacher = teachers.find((t) => t.id === id) || null;
-  const [selectedCourse, setSelectedCourse] = useState<LessonCourse | null>(
-    null
-  );
+
+  // 予約フォームからブラウザバックで戻ってきたときにコース選択をやり直さずに済むよう、
+  // 選択中のコースをタブ内で保持する（コース名で保存し、閉じれば消える）。
+  const courseStorageKey = teacher ? `teacherDetail:course:${teacher.id}` : "";
+
+  const [selectedCourse, setSelectedCourse] = useState<LessonCourse | null>(() => {
+    if (!teacher) return null;
+
+    try {
+      const savedTitle = sessionStorage.getItem(courseStorageKey);
+      if (!savedTitle) return null;
+      return teacher.courses.find((c) => c.title === savedTitle) ?? null;
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    if (!courseStorageKey) return;
+
+    try {
+      if (selectedCourse) sessionStorage.setItem(courseStorageKey, selectedCourse.title);
+      else sessionStorage.removeItem(courseStorageKey);
+    } catch (error) {
+      console.warn("コース選択の保存に失敗しました:", error);
+    }
+  }, [courseStorageKey, selectedCourse]);
 
   if (!teacher) {
     return (
