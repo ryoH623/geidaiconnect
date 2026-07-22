@@ -40,6 +40,18 @@ const PaymentSuccessPage: React.FC = () => {
   const sessionId = queryParams.get('session_id') || '';
   const reservationIdFromQuery = queryParams.get('reservationId') || '';
 
+  // 予約が成立したら、予約フォームに残っている下書き（reserveDraft:*）を破棄する。
+  // 決済キャンセルで /reservation に戻る場合は残したいので、成功時のみここで消す。
+  useEffect(() => {
+    try {
+      Object.keys(sessionStorage)
+        .filter((key) => key.startsWith('reserveDraft:'))
+        .forEach((key) => sessionStorage.removeItem(key));
+    } catch (error) {
+      console.warn('予約フォームの下書き破棄に失敗しました:', error);
+    }
+  }, []);
+
   const GET_RESERVATION_FOR_SUCCESS_URL =
     import.meta.env.VITE_GET_RESERVATION_FOR_SUCCESS_URL ||
     'https://us-central1-geidaiconnect.cloudfunctions.net/getReservationForSuccess';
@@ -186,7 +198,7 @@ const PaymentSuccessPage: React.FC = () => {
               {reservation?.name || ''}
             </p>
             <p>
-              <strong>ふりがな：</strong>
+              <strong>フリガナ：</strong>
               {reservation?.furigana || ''}
             </p>
             <p>

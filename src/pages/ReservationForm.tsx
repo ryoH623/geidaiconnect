@@ -96,7 +96,10 @@ const ReservationForm: React.FC = () => {
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [confirming, setConfirming] = useState(false);
+  // 確認画面は React state ではなく履歴エントリで表現する。
+  // こうしないとブラウザの戻るで /reserve ごと離脱してしまう。
+  const confirming =
+    (location.state as { confirming?: boolean } | null)?.confirming === true;
   const [submitting, setSubmitting] = useState(false);
   // 支払い方法。card=前日に請求（それまでは与信のみ）／paypay=即時決済
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'paypay'>('card');
@@ -114,6 +117,78 @@ const ReservationForm: React.FC = () => {
   const [studioResults, setStudioResults] = useState<AvailableStudio[]>([]);
   const [selectedStudio, setSelectedStudio] = useState<AvailableStudio | null>(null);
   const [studioSearchError, setStudioSearchError] = useState('');
+
+  // ── 入力内容の下書き（ブラウザバック対策）─────────────────────────
+  // 講師詳細へ戻ってから再度この画面に来ても入力し直さずに済むよう、
+  // ユーザーが自分で選んだ項目だけを sessionStorage に保持する（タブを閉じれば消える）。
+  // 氏名・フリガナ・メール・電話は会員情報から毎回自動反映されるため保存しない。
+  const draftKey = `reserveDraft:${teacherIdFromQuery}:${lessonCourse}`;
+  const [draftRestored, setDraftRestored] = useState(false);
+
+  useEffect(() => {
+
+    try {
+      const raw = sessionStorage.getItem(draftKey);
+      if (!raw) return;
+
+      const draft = JSON.parse(raw) as Record<string, unknown>;
+      console.log('予約フォームの下書きを復元します:', draft);
+
+      if (typeof draft.selectedDate === 'string') setSelectedDate(draft.selectedDate);
+      if (typeof draft.selectedTime === 'string') setSelectedTime(draft.selectedTime);
+      if (draft.paymentMethod === 'card' || draft.paymentMethod === 'paypay') {
+        setPaymentMethod(draft.paymentMethod);
+      }
+      if (typeof draft.location === 'string' || typeof draft.notes === 'string') {
+        setFormData((prev) => ({
+          ...prev,
+          location: typeof draft.location === 'string' ? draft.location : prev.location,
+          notes: typeof draft.notes === 'string' ? draft.notes : prev.notes,
+        }));
+      }
+      // 選択日が別の月なら、その月をカレンダーに表示する
+      if (typeof draft.selectedDate === 'string' && draft.selectedDate) {
+        const [y, m] = draft.selectedDate.split('-').map(Number);
+        if (y && m) setDisplayMonth(new Date(y, m - 1, 1));
+      }
+    } catch (error) {
+      console.warn('下書きの復元に失敗しました:', error);
+    } finally {
+      setDraftRestored(true);
+    }
+  }, [draftKey]);
+
+  useEffect(() => {
+    // ref ではなく state で判定する。ref だと復元と同じ effect フラッシュ内で true になり、
+    // 直後の保存が「復元前の空の値」で下書きを潰してしまう。
+    if (!draftRestored) return;
+
+    // 何も選ばれていない状態で既存の下書きを空にしない
+    if (!selectedDate && !selectedTime && !formData.location && !formData.notes) return;
+
+    try {
+      sessionStorage.setItem(
+        draftKey,
+        JSON.stringify({
+          selectedDate,
+          selectedTime,
+          location: formData.location,
+          notes: formData.notes,
+          paymentMethod,
+        })
+      );
+    } catch (error) {
+      console.warn('下書きの保存に失敗しました:', error);
+    }
+  }, [
+    draftKey,
+    draftRestored,
+    selectedDate,
+    selectedTime,
+    formData.location,
+    formData.notes,
+    paymentMethod,
+  ]);
 
   useEffect(() => {
     console.log('================ ReservationForm 初期表示ログ ================');
@@ -545,7 +620,7 @@ const ReservationForm: React.FC = () => {
     }
 
     if (!formData.furigana.trim()) {
-      newErrors.furigana = 'ふりがなを入力してください';
+      newErrors.furigana = 'フリガナを入力してください';
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -608,13 +683,17 @@ const ReservationForm: React.FC = () => {
 
     if (!validate()) return;
 
-    setConfirming(true);
+    // 履歴を1つ積む。ブラウザの戻るでこのエントリが外れ、入力画面に戻る。
+    navigate(`${location.pathname}${location.search}`, {
+      state: { ...(location.state as Record<string, unknown> | null), confirming: true },
+    });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleBackToEdit = () => {
     console.log('入力画面に戻るボタン押下');
-    setConfirming(false);
+    // ブラウザの戻ると同じ挙動にして履歴の整合を保つ
+    navigate(-1);
   };
 
   const handleFinalSubmit = async () => {
@@ -643,7 +722,7 @@ const ReservationForm: React.FC = () => {
     }
 
     if (!validate()) {
-      setConfirming(false);
+      navigate(-1);
       return;
     }
 
@@ -756,7 +835,7 @@ const ReservationForm: React.FC = () => {
               <p><strong>コース備考：</strong>{displayCourseNote}</p>
             )}
             <p><strong>お名前：</strong>{formData.name}</p>
-            <p><strong>ふりがな：</strong>{formData.furigana}</p>
+            <p><strong>フリガナ：</strong>{formData.furigana}</p>
             <p><strong>メールアドレス：</strong>{formData.email}</p>
             <p><strong>電話番号：</strong>{formData.phone}</p>
             <p><strong>レッスン場所：</strong>{formData.location}</p>
@@ -835,24 +914,34 @@ const ReservationForm: React.FC = () => {
       ) : (
         <>
           {teacherInfo?.authUid ? (
-            <>
-              {console.log('BookingCalendar 描画:', {
-                teacherId: teacherInfo.authUid,
-                displayMonth,
-                selectedDate,
-                selectedTime,
-              })}
+            // 下書き復元が終わるまでカレンダーを描画しない。BookingCalendar は初期選択日を
+            // マウント時にしか読まないため、先に描画すると復元した日時が反映されない。
+            draftRestored ? (
+              <>
+                {console.log('BookingCalendar 描画:', {
+                  teacherId: teacherInfo.authUid,
+                  displayMonth,
+                  selectedDate,
+                  selectedTime,
+                })}
 
-              <BookingCalendar
-                teacherId={teacherInfo.authUid}
-                displayMonth={displayMonth}
-                onChangeMonth={(nextMonth: Date) => {
-                  console.log('BookingCalendar から月変更:', nextMonth);
-                  setDisplayMonth(nextMonth);
-                }}
-                onDateTimeSelect={handleDateTimeSelect}
-              />
-            </>
+                <BookingCalendar
+                  teacherId={teacherInfo.authUid}
+                  displayMonth={displayMonth}
+                  onChangeMonth={(nextMonth: Date) => {
+                    console.log('BookingCalendar から月変更:', nextMonth);
+                    setDisplayMonth(nextMonth);
+                  }}
+                  onDateTimeSelect={handleDateTimeSelect}
+                  initialSelectedDate={selectedDate}
+                  initialSelectedTime={selectedTime}
+                />
+              </>
+            ) : (
+              <p style={{ textAlign: 'center', marginTop: '2rem' }}>
+                カレンダーを読み込み中です...
+              </p>
+            )
           ) : (
             <p style={{ textAlign: 'center', color: 'red', marginTop: '2rem' }}>
               講師情報が見つかりませんでした。講師ページから再度お試しください。
