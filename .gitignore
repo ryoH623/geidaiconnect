@@ -6,6 +6,5 @@ dist/
 .env
 .env.*
 firebase-debug.log
-lib/
 functions/lib/
 *.tsbuildinfo
