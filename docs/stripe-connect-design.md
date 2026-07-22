@@ -112,7 +112,8 @@ payment_intent_data: {
 
 ## 6. 要確認事項（実装前に必ず検証）
 
-1. **PayPay × destination charge の互換性**: 現在 `payment_method_types: ["card", "paypay"]`。PayPay が Connect の destination charge / transfer_data に対応しているか Stripe ドキュメントとテスト環境で要確認。非対応なら「PayPay 決済は legacy 扱い（別途精算）」か「カードのみ Connect」の分岐が必要
+1. ~~**PayPay × destination charge の互換性**~~ → **解決済み（2026-07-22）**。Stripe 公式ドキュメントで PayPay は「Connect のサポート：いいえ」「手動キャプチャーのサポート：いいえ」と確認。分岐を作らず **PayPay 自体を廃止しカードのみ**とした（[payment-timing-design.md](./payment-timing-design.md) の 2026-07-22 改訂）。`payment_method_types` は `["card"]`
+1-b. **destination charge × `capture_method=manual` の互換性**: 本設計書は Phase B（カード＝与信→締切キャプチャ）より前に作成しており、与信方式との整合が未検証。与信時と capture 時のどちらで講師へ送金されるか、テスト環境で要確認。非対応の場合は destination charge をやめ、capture 後に `transfers.create` する方式（separate charges and transfers）へ切り替える
 2. **講師側の受け入れ**: Express オンボーディングでは講師が個人事業主として本人確認・口座登録を行う。案内文と FAQ の整備が必要
 3. **手数料率**: **一律 18% で開始（暫定決定・2026-07 協議）**。逓減制（例: 同一講師×生徒の継続 6 回目以降 15%。直接取引の抑止も兼ねる）は運用が安定してから導入。reservations に適用率を記録するため後からの変更・逓減化は過去データと矛盾しない
 4. **既存 paid 予約の扱い**: 移行前の売上は従来どおり手動精算（本設計の対象外）。`payoutModel` フィールドで区別できる

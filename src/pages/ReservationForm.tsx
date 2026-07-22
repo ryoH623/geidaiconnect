@@ -42,7 +42,7 @@ type CreateReservationAndCheckoutPayload = {
   phone: string;
   location: string;
   notes?: string;
-  paymentMethod?: 'card' | 'paypay';
+  paymentMethod?: 'card';
   lessonType?: string;
   durationMin?: number;
   studioId?: string;
@@ -101,8 +101,8 @@ const ReservationForm: React.FC = () => {
   const confirming =
     (location.state as { confirming?: boolean } | null)?.confirming === true;
   const [submitting, setSubmitting] = useState(false);
-  // 支払い方法。card=前日に請求（それまでは与信のみ）／paypay=即時決済
-  const [paymentMethod, setPaymentMethod] = useState<'card' | 'paypay'>('card');
+  // 支払い方法はクレジットカードのみ。予約時は与信のみで、請求はレッスン前日に確定する。
+  const paymentMethod = 'card' as const;
 
   // ご予約者情報は会員情報（users/{uid}）から自動取得する。
   // 未ログイン→予約不可、プロフィール未完（氏名/フリガナ/メール/電話が欠け）→/profileへ誘導。
@@ -136,9 +136,6 @@ const ReservationForm: React.FC = () => {
 
       if (typeof draft.selectedDate === 'string') setSelectedDate(draft.selectedDate);
       if (typeof draft.selectedTime === 'string') setSelectedTime(draft.selectedTime);
-      if (draft.paymentMethod === 'card' || draft.paymentMethod === 'paypay') {
-        setPaymentMethod(draft.paymentMethod);
-      }
       if (typeof draft.location === 'string' || typeof draft.notes === 'string') {
         setFormData((prev) => ({
           ...prev,
@@ -174,7 +171,6 @@ const ReservationForm: React.FC = () => {
           selectedTime,
           location: formData.location,
           notes: formData.notes,
-          paymentMethod,
         })
       );
     } catch (error) {
@@ -187,7 +183,6 @@ const ReservationForm: React.FC = () => {
     selectedTime,
     formData.location,
     formData.notes,
-    paymentMethod,
   ]);
 
   useEffect(() => {
@@ -853,34 +848,11 @@ const ReservationForm: React.FC = () => {
             }}
           >
             <label style={{ fontWeight: 'bold' }}>お支払い方法</label>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: '0.5rem' }}>
-              <label style={{ fontWeight: 'normal' }}>
-                <input
-                  type="radio"
-                  name="paymentMethod"
-                  value="card"
-                  checked={paymentMethod === 'card'}
-                  onChange={() => setPaymentMethod('card')}
-                />{' '}
-                クレジットカード
-                <span style={{ color: '#666', fontSize: '0.85rem' }}>
-                  （ご予約時はカードの確保のみ。レッスン前日にお支払いが確定します）
-                </span>
-              </label>
-              <label style={{ fontWeight: 'normal' }}>
-                <input
-                  type="radio"
-                  name="paymentMethod"
-                  value="paypay"
-                  checked={paymentMethod === 'paypay'}
-                  onChange={() => setPaymentMethod('paypay')}
-                />{' '}
-                PayPay
-                <span style={{ color: '#666', fontSize: '0.85rem' }}>
-                  （ご予約時にお支払いが完了します。前日まではキャンセルで全額返金）
-                </span>
-              </label>
-            </div>
+            <p style={{ margin: '0.5rem 0 0' }}>クレジットカード</p>
+            <p style={{ color: '#666', fontSize: '0.85rem', margin: '0.25rem 0 0' }}>
+              ご予約時点ではカードのお支払い枠を確保するだけで、請求は発生しません。
+              レッスン前日にお支払いが確定します。前日23:59までにキャンセルされた場合、請求は発生しません。
+            </p>
           </div>
 
           <div

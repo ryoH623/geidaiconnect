@@ -13,10 +13,10 @@
   ```
   （本番テストプロジェクトへデプロイして検証する場合は Webhook エンドポイントをテスト用に登録）
 - テストカード：`4242 4242 4242 4242`（任意の将来日／CVC）。3DS 要求のテストは `4000 0027 6000 3184` 等。
-- PayPay：テストモードのリダイレクト画面で「Authorize（成功）」を選ぶ。
 
 ## シナリオ1：カード予約＝与信のみ（未請求）
-1. 予約フォームで日時を選び、確認画面で**クレジットカード**を選択 →「お支払いへ進む」。
+1. 予約フォームで日時を選び、確認画面で「お支払いへ進む」。
+   （2026-07-22 以降、支払い方法はクレジットカードのみ。選択 UI は廃止済み）
 2. テストカードで Checkout 完了。
 3. **確認ポイント**
    - Firestore の該当 `reservations` が `paymentStatus: "authorized"`、`reservationStatus: "confirmed"`。
@@ -43,28 +43,15 @@
    - 枠（schedules / studioBookings）が `open` に戻る。
    - キャンセルメールが「請求は発生しません」の文面。
 
-## シナリオ4：PayPay 予約＝即時決済
-1. 確認画面で **PayPay** を選択 → Checkout で承認。
+## シナリオ4：支払い方法がカードのみになっていること
+
+※ PayPay は 2026-07-22 に廃止（Stripe Connect 非対応・返金時に手数料が戻らないため）。
+旧シナリオ4「PayPay 即時決済」と5「PayPay 返金」は削除した。
+
+1. Checkout の画面を開く。
 2. **確認ポイント**
-   - `reservations` が即 `paymentStatus: "paid"`、`paidAt` セット。
-   - 決済確定メールが届く。
-   - PaymentIntent が `succeeded`。
-
-## シナリオ5：PayPay 予約を締切前にキャンセル＝返金
-1. シナリオ4の予約を締切前にキャンセル。
-2. **確認ポイント**
-   - Stripe で**返金**が作成される（テストモードでは手数料は戻らない旨は本番同様）。
-   - `reservations` が `reservationStatus: "cancelled"`、`paymentStatus: "refunded"`、`refundId` セット。
-   - 枠が open に戻る。
-
-## シナリオ6：予約可能期間（Phase A）
-- カレンダーで**本日+31日以降が選べない**、月移動が現在月〜上限月に制限される。
-- `createReservationAndCheckout` に範囲外 `date` を渡すと `failed-precondition` で拒否。
-
-## 合否
-- 上記すべて OK → 本番反映（functions deploy → dist アップロード）。
-- 失敗があれば内容を共有 → 修正して再テスト。
-
-## 既知の未対応（Phase C）
-- capture 失敗時（カード期限切れ・限度額等）の生徒への再決済案内・自動キャンセルは未実装。
-  現状は `payment_failed` に記録＋ログのみ。
+   - 支払い手段として **カードのみ**が表示され、PayPay が出ない。
+   - 予約フォームの確認画面に支払い方法の選択肢が出ず、「クレジットカード」と
+     請求タイミングの説明だけが表示される。
+   - 旧クライアントが `paymentMethod: "paypay"` を送っても card として処理され、
+     Functions のログに警告が出る。
