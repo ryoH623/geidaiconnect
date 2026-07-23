@@ -224,7 +224,9 @@ const GeidaiConnectUi: React.FC = () => {
       </div>
 
       <section className="features-section">
-        <h3>GeidaiConnectの主な特徴</h3>
+        <h3>
+          GeidaiConnectの<span className="nowrap-unit">主な特徴</span>
+        </h3>
         <div className="feature-grid">
           {featureItems.map((item) => (
             <div key={item.title} className="feature-card">
