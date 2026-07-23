@@ -204,7 +204,7 @@ const GeidaiConnectUi: React.FC = () => {
 
       <div id="about" className="about-section enhanced">
         <h2>
-          GeidaiConnect<span className="heading-reading">（ゲイダイ・コネクト）</span>とは？
+          GeidaiConnectとは？<span className="heading-reading">（ゲイダイ・コネクト）</span>
         </h2>
         <p className="catch-copy">藝大卒とつながる、芸術への架け橋</p>
         <p>

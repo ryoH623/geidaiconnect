@@ -4010,11 +4010,13 @@ body {
   font-size: clamp(1.65rem, 7vw, 2rem);
 }
 
-/* 見出しの読み仮名（ゲイダイ・コネクト）だけ小さく・細く。em 指定で h2 サイズに追従。
-   nowrap で単語途中の折り返しを防ぎ、狭い画面では読み仮名ごと次行へ回す。 */
+/* 見出しの読み仮名（ゲイダイ・コネクト）。em 指定で h2 サイズに追従し、
+   独立行（サブタイトル）として「GeidaiConnectとは？」の下に小さく添える。 */
 .about-section.enhanced h2 .heading-reading {
-  font-size: 0.6em;
+  display: block;
+  font-size: 0.55em;
   font-weight: normal;
+  margin-top: 0.3em;
   white-space: nowrap;
 }
 
