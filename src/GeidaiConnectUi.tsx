@@ -180,16 +180,16 @@ const GeidaiConnectUi: React.FC = () => {
       <section className="hero">
         <HeroArt />
         <div className="hero-inner">
-          <p className="hero-eyebrow">東京藝術大学卒業生による、レッスン・依頼マッチング</p>
+          <p className="hero-eyebrow">東京藝術大学卒業生とつながるマッチングサービス</p>
           <h1 className="hero-title">
-            藝大卒がつなぐ、
+            藝大の才能を、
             <br />
-            芸術の架け橋
+            あなたのそばに。
           </h1>
           <p className="hero-lead">
-            音楽も、美術も。本物のプロフェッショナルから学び、依頼する。
+            学ぶ人にも、頼む人にも。
             <br />
-            あなたと芸術の世界を、GeidaiConnectがつなぎます。
+            芸術のプロと出会える場所、GeidaiConnect。
           </p>
           <div className="hero-actions">
             <a href="#search" className="hero-cta">
@@ -204,7 +204,7 @@ const GeidaiConnectUi: React.FC = () => {
 
       <div id="about" className="about-section enhanced">
         <h2>GeidaiConnect（ゲイダイ・コネクト）とは？</h2>
-        <p className="catch-copy">藝大卒がつなぐ、芸術の架け橋</p>
+        <p className="catch-copy">藝大卒とつながる、芸術への架け橋</p>
         <p>
           GeidaiConnectは、東京藝術大学（藝大）を卒業した優れた芸術家たちと、
           音楽や美術を本格的に学びたい方、または演奏・展示を依頼したい方をつなぐ、
