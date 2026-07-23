@@ -203,7 +203,9 @@ const GeidaiConnectUi: React.FC = () => {
       </section>
 
       <div id="about" className="about-section enhanced">
-        <h2>GeidaiConnect（ゲイダイ・コネクト）とは？</h2>
+        <h2>
+          GeidaiConnect<span className="heading-reading">（ゲイダイ・コネクト）</span>とは？
+        </h2>
         <p className="catch-copy">藝大卒とつながる、芸術への架け橋</p>
         <p>
           GeidaiConnectは、東京藝術大学（藝大）を卒業した優れた芸術家たちと、
