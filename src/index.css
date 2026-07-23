@@ -274,6 +274,16 @@ a[href^="mailto"] {
   margin-bottom: 0.5rem;
 }
 
+/* 大学との無関係を明示する免責表記（控えめに） */
+.footer .footer-disclaimer {
+  max-width: 640px;
+  margin: 1.2rem auto 0;
+  font-size: 0.75rem;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.55);
+  text-align: center;
+}
+
 /* 運営者情報セクション */
 .operator-info-section {
   max-width: 960px;

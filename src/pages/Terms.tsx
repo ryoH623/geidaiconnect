@@ -6,7 +6,7 @@ const Terms: React.FC = () => {
   return (
     <main className="about-section fade-in-up">
       <h2 className="terms-title">Geidai Connect 利用規約（ベータ版）</h2>
-      <p style={{ textAlign: "center" }}>最終更新日：2026年7月15日</p>
+      <p style={{ textAlign: "center" }}>最終更新日：2026年7月23日</p>
 
       <h3 className="terms-section-title">第1条（適用）</h3>
       <p>
@@ -24,7 +24,13 @@ const Terms: React.FC = () => {
         <li>「ユーザー」：講師・生徒その他、本サービスを利用するすべての方。</li>
       </ul>
 
-      <h3 className="terms-section-title">第3条（サービス内容）</h3>
+      <h3 className="terms-section-title">第3条（本サービスと東京藝術大学との関係）</h3>
+      <p>
+        本サービスは、東京藝術大学の卒業生が参加する民間サービスであり、東京藝術大学および同大学の関連団体が運営・公認・提携するものではありません。
+        本サービスにおける「藝大」「東京藝術大学」等の表記は、講師の出身校を示す目的でのみ使用しており、同大学との提携・関連を示すものではありません。
+      </p>
+
+      <h3 className="terms-section-title">第4条（サービス内容）</h3>
       <p>
         本サービスは、東京藝術大学出身者による音楽・美術の個人レッスンを希望者に紹介するマッチングプラットフォームです。
         レッスンは講師が設定した条件に基づき、生徒が本サービス上で申し込み・受講します。
@@ -32,7 +38,7 @@ const Terms: React.FC = () => {
         運営者が直接レッスンを提供し、又はその内容・品質を保証するものではありません。
       </p>
 
-      <h3 className="terms-section-title">第4条（登録）</h3>
+      <h3 className="terms-section-title">第5条（登録）</h3>
       <p>
         ユーザー登録を希望する方は、運営者が定める方法に従って正確な情報を提供し、申請するものとします。
         登録申請者が以下のいずれかに該当する場合、運営者は登録を拒否し、又は登録を削除することがあります。
@@ -43,7 +49,7 @@ const Terms: React.FC = () => {
         <li>その他、運営者が不適切と判断した場合</li>
       </ul>
 
-      <h3 className="terms-section-title">第5条（料金・支払い）</h3>
+      <h3 className="terms-section-title">第6条（料金・支払い）</h3>
       <p>
         生徒は、本サービス上に表示されたレッスン料を、本サービスが提供する方法（クレジットカードによるオンライン決済）によりお支払いいただきます。
         決済は、運営者が利用する決済代行サービス（Stripe 等）を通じて処理されます。
@@ -52,14 +58,14 @@ const Terms: React.FC = () => {
         その金額・条件は予約時に本サービス上で表示し、又は事前に講師と協議のうえ合意するものとします。
       </p>
 
-      <h3 className="terms-section-title">第6条（予約の成立・変更）</h3>
+      <h3 className="terms-section-title">第7条（予約の成立・変更）</h3>
       <p>
         レッスンの予約は、生徒が本サービス上で日時・コースを選択し、決済が完了した時点で成立します。
         予約日時の変更を希望する場合は、可能な範囲で講師と協議のうえ行うものとし、
         講師・スタジオの空き状況によっては変更に応じられないことがあります。
       </p>
 
-      <h3 className="terms-section-title">第7条（キャンセル・返金）</h3>
+      <h3 className="terms-section-title">第8条（キャンセル・返金）</h3>
       <p>
         予約成立後のキャンセルおよび返金の取り扱いは、次のとおりとします。
       </p>
@@ -80,7 +86,7 @@ const Terms: React.FC = () => {
         </li>
       </ul>
 
-      <h3 className="terms-section-title">第8条（禁止事項）</h3>
+      <h3 className="terms-section-title">第9条（禁止事項）</h3>
       <p>ユーザーは、本サービスの利用にあたり、次の行為をしてはなりません。</p>
       <ul>
         <li>虚偽情報の登録</li>
@@ -90,7 +96,7 @@ const Terms: React.FC = () => {
         <li>法令又は公序良俗に反する行為</li>
       </ul>
 
-      <h3 className="terms-section-title">第9条（免責事項）</h3>
+      <h3 className="terms-section-title">第10条（免責事項）</h3>
       <p>
         本サービスは、講師と生徒をつなぐ場を提供するものであり、運営者は、講師の指導内容・スキル・対応等について保証するものではありません。
         ユーザー間で生じたトラブルは、原則として当事者間で解決していただくものとします。
@@ -102,32 +108,32 @@ const Terms: React.FC = () => {
         本サービスは、事前の告知なく内容の一部を変更・停止・終了する場合があります。
       </p>
 
-      <h3 className="terms-section-title">第10条（知的財産権）</h3>
+      <h3 className="terms-section-title">第11条（知的財産権）</h3>
       <p>
         本サービスに掲載される文章・写真・ロゴ・デザインなどすべての知的財産は、
         運営者又は正当な権利者に帰属します。
       </p>
 
-      <h3 className="terms-section-title">第11条（個人情報の取扱い）</h3>
+      <h3 className="terms-section-title">第12条（個人情報の取扱い）</h3>
       <p>
         運営者は、ユーザーの個人情報を、別途定める
         <Link to="/privacy">プライバシーポリシー</Link>
         に従って適切に取り扱います。
       </p>
 
-      <h3 className="terms-section-title">第12条（退会・登録削除）</h3>
+      <h3 className="terms-section-title">第13条（退会・登録削除）</h3>
       <p>
         ユーザーはいつでも退会できます。
         運営者は、ユーザーが本規約に違反した場合、事前の通知なく登録を削除することがあります。
       </p>
 
-      <h3 className="terms-section-title">第13条（規約の改定）</h3>
+      <h3 className="terms-section-title">第14条（規約の改定）</h3>
       <p>
         運営者は本規約を必要に応じて改定することがあります。
         改定後の規約は、運営者が別途定める場合を除き、本サービスに掲載された時点で効力を生じます。
       </p>
 
-      <h3 className="terms-section-title">第14条（準拠法・裁判管轄）</h3>
+      <h3 className="terms-section-title">第15条（準拠法・裁判管轄）</h3>
       <p>
         本規約の解釈には日本法を準拠法とします。
         本サービスに関して紛争が生じた場合は、運営者の所在地を管轄する地方裁判所を第一審の専属的合意管轄裁判所とします。

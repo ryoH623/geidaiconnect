@@ -13,6 +13,9 @@ const Footer: React.FC = () => {
           <a href="/contact">お問い合わせ</a>
           <a href="/recruit">講師募集</a>
         </div>
+        <p className="footer-disclaimer">
+          GeidaiConnectは東京藝術大学の卒業生有志による民間サービスです。東京藝術大学および関連団体が運営・公認・提携するものではありません。
+        </p>
       </div>
     </footer>
   );

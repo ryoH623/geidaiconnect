@@ -11,6 +11,11 @@ const Faq: React.FC = () => {
 
         <div className="faq-content" style={{ maxWidth: "800px", margin: "0 auto", textAlign: "left" }}>
           <h3>🔰 ご利用に関して</h3>
+          <p><strong>Q. GeidaiConnectは東京藝術大学の公式サービスですか？</strong><br />
+            A. いいえ。GeidaiConnectは藝大卒業生の有志が運営する民間サービスで、東京藝術大学および関連団体が運営・公認・提携するものではありません。
+            講師はいずれも同大学の出身者ですが、大学とは資本・運営上の関係はありません。
+          </p>
+
           <p><strong>Q. 初心者でも申し込めますか？</strong><br />
             A. はい、Geidai Connectには「初心者歓迎」の講師が多数在籍しています。講師プロフィールに「初心者歓迎」タグが表示されています。
           </p>
