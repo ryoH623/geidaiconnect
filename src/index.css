@@ -284,6 +284,105 @@ a[href^="mailto"] {
   text-align: center;
 }
 
+/* 管理ダッシュボード */
+.admin-page {
+  max-width: 1000px;
+  margin: 2rem auto 4rem;
+  padding: 0 1rem;
+}
+
+.admin-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1rem 0 1.5rem;
+}
+
+.admin-toolbar select {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #d8d2c4;
+  border-radius: 6px;
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.kpi-card {
+  background: #fff;
+  border: 1px solid #ece7db;
+  border-radius: 12px;
+  padding: 1.1rem 1.2rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+}
+
+.kpi-card .kpi-label {
+  font-size: 0.82rem;
+  color: #8a8270;
+  margin: 0 0 0.4rem;
+}
+
+.kpi-card .kpi-value {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #4a3f2a;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.kpi-card .kpi-sub {
+  font-size: 0.78rem;
+  color: #a49b85;
+  margin: 0.3rem 0 0;
+}
+
+.admin-chart-card {
+  background: #fff;
+  border: 1px solid #ece7db;
+  border-radius: 12px;
+  padding: 1.2rem 1rem 0.6rem;
+  margin-bottom: 1.5rem;
+}
+
+.admin-chart-card h3 {
+  margin: 0 0 0.8rem 0.4rem;
+  font-size: 1.05rem;
+  color: #4a3f2a;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 0.6rem 0.7rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.admin-table thead tr {
+  border-bottom: 2px solid #d8d2c4;
+}
+
+.admin-table tbody tr {
+  border-bottom: 1px solid #eee;
+}
+
+.admin-table tbody tr:hover {
+  background: #faf8f2;
+}
+
+.admin-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 /* 特定商取引法に基づく表記 */
 .legal-table {
   max-width: 820px;

@@ -37,6 +37,10 @@ const TeacherReservations = lazy(
   () => import("./pages/teachers/TeacherReservations")
 );
 const AdminHome = lazy(() => import("./pages/admin/AdminHome"));
+const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
+const AdminStudents = lazy(() => import("./pages/admin/AdminStudents"));
+const AdminTeachers = lazy(() => import("./pages/admin/AdminTeachers"));
+const AdminTeacherDetail = lazy(() => import("./pages/admin/AdminTeacherDetail"));
 const AdminReservations = lazy(() => import("./pages/admin/AdminReservations"));
 const AdminUsers = lazy(() => import("./pages/admin/AdminUsers"));
 const AdminReviews = lazy(() => import("./pages/admin/AdminReviews"));
@@ -142,6 +146,38 @@ function App() {
             element={
               <RequireAdmin>
                 <AdminHome />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/dashboard"
+            element={
+              <RequireAdmin>
+                <AdminDashboard />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/students"
+            element={
+              <RequireAdmin>
+                <AdminStudents />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/teachers"
+            element={
+              <RequireAdmin>
+                <AdminTeachers />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/teachers/:id"
+            element={
+              <RequireAdmin>
+                <AdminTeacherDetail />
               </RequireAdmin>
             }
           />

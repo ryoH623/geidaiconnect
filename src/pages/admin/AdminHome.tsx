@@ -20,6 +20,30 @@ const AdminHome: React.FC = () => {
           }}
         >
           <Link
+            to="/admin/dashboard"
+            className="form-button"
+            style={{ textAlign: "center" }}
+          >
+            ダッシュボード（売上・推移）
+          </Link>
+
+          <Link
+            to="/admin/students"
+            className="form-button"
+            style={{ textAlign: "center" }}
+          >
+            登録済み生徒一覧
+          </Link>
+
+          <Link
+            to="/admin/teachers"
+            className="form-button"
+            style={{ textAlign: "center" }}
+          >
+            登録済み講師一覧（講師別売上）
+          </Link>
+
+          <Link
             to="/admin/reservations"
             className="form-button"
             style={{ textAlign: "center" }}
