@@ -17,6 +17,7 @@ import Contact from "./pages/Contact";
 import RequestPage from "./pages/RequestPage";
 import TeacherRecruit from "./pages/TeacherRecruit";
 import Terms from "./pages/Terms";
+import LegalNotice from "./pages/LegalNotice";
 import Faq from "./pages/Faq";
 import RequireAdmin from "./components/RequireAdmin";
 import RequireTeacher from "./components/RequireTeacher";
@@ -65,6 +66,7 @@ function App() {
           {/* 演奏・展示などの依頼フォーム（公開） */}
           <Route path="/request" element={<RequestPage />} />
           <Route path="/terms" element={<Terms />} />
+          <Route path="/legal" element={<LegalNotice />} />
           {/* 講師募集ページ（未ログインの応募者向け・公開） */}
           <Route path="/recruit" element={<TeacherRecruit />} />
 
