@@ -4025,6 +4025,17 @@ body {
   letter-spacing: 0.12em;
 }
 
+/* 意味の切れ目（文節）を途中で分断させないための塊。狭い画面ではこの境界でのみ改行される。 */
+.nowrap-unit {
+  white-space: nowrap;
+}
+
+/* 本文は文節単位で自然に改行（対応ブラウザのみ。非対応時は従来の折り返しにフォールバック）。 */
+.hero-lead,
+.about-section.enhanced p:not(.catch-copy) {
+  word-break: auto-phrase;
+}
+
 .about-section.enhanced p:not(.catch-copy) {
   line-height: 2;
   letter-spacing: 0.03em;
