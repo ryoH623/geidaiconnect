@@ -13,9 +13,15 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow create: if isSignedIn() && request.auth.uid == uid;
+      // 作成は本人のみ。自分を admin として作成する権限昇格を防ぐため role は student/teacher に限定。
+      allow create: if isSignedIn() && request.auth.uid == uid
+        && request.resource.data.role in ['student', 'teacher'];
       allow read: if (isSignedIn() && request.auth.uid == uid) || isAdmin();
-      allow update, delete: if isSignedIn() && request.auth.uid == uid;
+      // 更新は本人のみ。ただし role の変更は禁止（admin への自己昇格を防ぐ）。
+      // admin 付与は Firebase コンソール / Admin SDK（ルールをバイパス）でのみ行う。
+      allow update: if isSignedIn() && request.auth.uid == uid
+        && request.resource.data.role == resource.data.role;
+      allow delete: if isSignedIn() && request.auth.uid == uid;
     }
 
     match /reservations/{reservationId} {

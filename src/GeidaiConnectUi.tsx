@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { teachers, Teacher } from "./data/teachers";
+import BudouxText from "./components/BudouxText";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faGraduationCap,
@@ -180,16 +181,19 @@ const GeidaiConnectUi: React.FC = () => {
       <section className="hero">
         <HeroArt />
         <div className="hero-inner">
-          <p className="hero-eyebrow">東京藝術大学卒業生による、レッスン・依頼マッチング</p>
+          <p className="hero-eyebrow">
+            <span className="nowrap-unit">東京藝術大学卒業生とつながる</span>
+            <span className="nowrap-unit">マッチングサービス</span>
+          </p>
           <h1 className="hero-title">
-            藝大卒がつなぐ、
+            藝大の才能を、
             <br />
-            芸術の架け橋
+            あなたのそばに。
           </h1>
           <p className="hero-lead">
-            音楽も、美術も。本物のプロフェッショナルから学び、依頼する。
+            学ぶ人にも、頼む人にも。
             <br />
-            あなたと芸術の世界を、GeidaiConnectがつなぎます。
+            芸術のプロと出会える場所、GeidaiConnect。
           </p>
           <div className="hero-actions">
             <a href="#search" className="hero-cta">
@@ -203,22 +207,29 @@ const GeidaiConnectUi: React.FC = () => {
       </section>
 
       <div id="about" className="about-section enhanced">
-        <h2>GeidaiConnect（ゲイダイ・コネクト）とは？</h2>
-        <p className="catch-copy">藝大卒がつなぐ、芸術の架け橋</p>
-        <p>
-          GeidaiConnectは、東京藝術大学（藝大）を卒業した優れた芸術家たちと、
-          音楽や美術を本格的に学びたい方、または演奏・展示を依頼したい方をつなぐ、
-          アートと音楽の総合マッチングサービスです。
+        <h2>
+          GeidaiConnectとは？<span className="heading-reading">（ゲイダイ・コネクト）</span>
+        </h2>
+        <p className="catch-copy">
+          <span className="nowrap-unit">藝大卒とつながる、</span>
+          <span className="nowrap-unit">芸術への架け橋</span>
         </p>
         <p>
-          「習いたい」「依頼したい」「つながりたい」——
-          GeidaiConnectは、藝大卒のプロフェッショナルが、
-          あなたと芸術の世界をつなぐ架け橋となります。
+          <BudouxText>
+            東京藝術大学（藝大）で研鑽を積んだプロの芸術家に、直接学び、直接依頼する。GeidaiConnectは、音楽と美術のためのマッチングサービスです。
+          </BudouxText>
+        </p>
+        <p>
+          <BudouxText>
+            習いたい人も、頼みたい人も。藝大卒のプロフェッショナルが、あなたと芸術の世界をつなぎます。
+          </BudouxText>
         </p>
       </div>
 
       <section className="features-section">
-        <h3>GeidaiConnectの主な特徴</h3>
+        <h3>
+          GeidaiConnectの<span className="nowrap-unit">主な特徴</span>
+        </h3>
         <div className="feature-grid">
           {featureItems.map((item) => (
             <div key={item.title} className="feature-card">
@@ -226,7 +237,9 @@ const GeidaiConnectUi: React.FC = () => {
                 <FontAwesomeIcon icon={item.icon} />
               </div>
               <h4>{item.title}</h4>
-              <p>{item.text}</p>
+              <p>
+                <BudouxText>{item.text}</BudouxText>
+              </p>
             </div>
           ))}
         </div>
@@ -242,7 +255,9 @@ const GeidaiConnectUi: React.FC = () => {
                 <FontAwesomeIcon icon={step.icon} />
               </div>
               <h4>{step.title}</h4>
-              <p>{step.text}</p>
+              <p>
+                <BudouxText>{step.text}</BudouxText>
+              </p>
             </div>
           ))}
         </div>
@@ -255,7 +270,9 @@ const GeidaiConnectUi: React.FC = () => {
       <section id="search" className="search-section fade-in-up">
         <h3>講師を探す</h3>
         <p>
-          気になる講師のカードを選ぶと、プロフィール・レッスンコースの確認と予約ができます。
+          <BudouxText>
+            気になる講師のカードを選ぶと、プロフィール・レッスンコースの確認と予約ができます。
+          </BudouxText>
         </p>
         <p className="service-area-note">
           現在の対応エリア：{prefectureOptions.join("・")}（順次拡大中）

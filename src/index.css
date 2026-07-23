@@ -274,6 +274,16 @@ a[href^="mailto"] {
   margin-bottom: 0.5rem;
 }
 
+/* 大学との無関係を明示する免責表記（控えめに） */
+.footer .footer-disclaimer {
+  max-width: 640px;
+  margin: 1.2rem auto 0;
+  font-size: 0.75rem;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.55);
+  text-align: center;
+}
+
 /* 運営者情報セクション */
 .operator-info-section {
   max-width: 960px;
@@ -4010,9 +4020,31 @@ body {
   font-size: clamp(1.65rem, 7vw, 2rem);
 }
 
+/* 見出しの読み仮名（ゲイダイ・コネクト）。em 指定で h2 サイズに追従し、
+   独立行（サブタイトル）として「GeidaiConnectとは？」の下に小さく添える。 */
+.about-section.enhanced h2 .heading-reading {
+  display: block;
+  font-size: 0.55em;
+  font-weight: normal;
+  margin-top: 0.3em;
+  white-space: nowrap;
+}
+
 .about-section.enhanced .catch-copy {
   text-align: center;
   letter-spacing: 0.12em;
+}
+
+/* 意味の切れ目（文節）を途中で分断させないための塊。狭い画面ではこの境界でのみ改行される。 */
+.nowrap-unit {
+  white-space: nowrap;
+}
+
+/* BudouX（文節単位の改行）。keep-all で文字間の自動改行を止め、挿入した <wbr> の位置でのみ改行する。
+   overflow-wrap: anywhere は、1文節が幅を超えた場合の緊急回避（横はみ出し防止）。全ブラウザで有効。 */
+.budoux {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 
 .about-section.enhanced p:not(.catch-copy) {
