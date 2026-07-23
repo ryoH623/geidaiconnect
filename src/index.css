@@ -4030,10 +4030,11 @@ body {
   white-space: nowrap;
 }
 
-/* 本文は文節単位で自然に改行（対応ブラウザのみ。非対応時は従来の折り返しにフォールバック）。 */
-.hero-lead,
-.about-section.enhanced p:not(.catch-copy) {
-  word-break: auto-phrase;
+/* BudouX（文節単位の改行）。keep-all で文字間の自動改行を止め、挿入した <wbr> の位置でのみ改行する。
+   overflow-wrap: anywhere は、1文節が幅を超えた場合の緊急回避（横はみ出し防止）。全ブラウザで有効。 */
+.budoux {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 
 .about-section.enhanced p:not(.catch-copy) {
