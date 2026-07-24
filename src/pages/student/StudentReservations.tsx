@@ -6,17 +6,21 @@ import { httpsCallable } from "firebase/functions";
 import { useAuth } from "../../contexts/AuthContext";
 import { db, functions } from "../../firebase";
 import { collection, query, where, getDocs } from "firebase/firestore";
+import BookingCalendar from "../../components/booking/BookingCalendar";
 
 interface Reservation {
   id: string;
+  teacherId: string;
   teacherName: string;
   lessonCourse: string;
+  lessonType: string; // "自宅" | "スタジオ" | "出張"
   lessonDate: string; // "YYYY-MM-DD"
   lessonTime: string; // "HH:mm"
   location: string;
   lessonAmount: number | null;
   paymentStatus: string;
   reservationStatus: string;
+  rescheduleCount: number; // 日程変更した回数（1回まで許可）
   notes?: string;
 }
 
@@ -65,12 +69,104 @@ function isPreCharge(res: { paymentStatus: string }): boolean {
   return res.paymentStatus === "authorized";
 }
 
+// レッスン開始日時（JST）。
+function lessonStartMs(res: { lessonDate: string; lessonTime: string }): number {
+  return new Date(
+    `${res.lessonDate}T${res.lessonTime || "00:00"}:00+09:00`
+  ).getTime();
+}
+
+// 日程変更（振替）可能か: 確定・決済済み(paid/authorized)・自宅/出張・未振替・レッスン開始前。
+// バックエンド rescheduleReservation の判定と一致させる。
+function isReschedulable(res: Reservation): boolean {
+  return (
+    res.reservationStatus === "confirmed" &&
+    (res.paymentStatus === "paid" || res.paymentStatus === "authorized") &&
+    (res.lessonType === "自宅" || res.lessonType === "出張") &&
+    res.rescheduleCount < 1 &&
+    Date.now() < lessonStartMs(res)
+  );
+}
+
 const StudentReservations: React.FC = () => {
   const { user } = useAuth();
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  // 日程変更（振替）用: 変更パネルを開いている予約ID・選択中の新日時・送信中フラグ・表示月
+  const [reschedulingId, setReschedulingId] = useState<string | null>(null);
+  const [newSlotDate, setNewSlotDate] = useState("");
+  const [newSlotTime, setNewSlotTime] = useState("");
+  const [rescheduleMonth, setRescheduleMonth] = useState<Date>(new Date());
+  const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false);
+
+  const openReschedule = (res: Reservation) => {
+    setReschedulingId(res.id);
+    setNewSlotDate("");
+    setNewSlotTime("");
+    setRescheduleMonth(new Date());
+  };
+
+  const closeReschedule = () => {
+    setReschedulingId(null);
+    setNewSlotDate("");
+    setNewSlotTime("");
+  };
+
+  const handleReschedule = async (res: Reservation) => {
+    if (!newSlotDate || !newSlotTime) {
+      alert("変更先の日時を選んでください。");
+      return;
+    }
+    const confirmed = window.confirm(
+      `以下の予約の日程を変更します。よろしいですか？\n\n` +
+        `${res.teacherName} / ${res.lessonCourse}\n` +
+        `変更前：${res.lessonDate} ${res.lessonTime}\n` +
+        `変更後：${newSlotDate} ${newSlotTime}\n\n` +
+        `お支払いはそのまま新しい日時へ引き継がれます（追加請求・返金はありません）。\n` +
+        `日程変更は1回までです。`
+    );
+    if (!confirmed) return;
+
+    try {
+      setRescheduleSubmitting(true);
+      const callable = httpsCallable<
+        { reservationId: string; newDate: string; newTime: string },
+        { ok: boolean; message: string }
+      >(functions, "rescheduleReservation");
+      const result = await callable({
+        reservationId: res.id,
+        newDate: newSlotDate,
+        newTime: newSlotTime,
+      });
+
+      alert(result.data?.message || "予約の日程を変更しました。");
+
+      // 画面へ即時反映（新日時・振替回数）
+      setReservations((prev) =>
+        prev.map((r) =>
+          r.id === res.id
+            ? {
+                ...r,
+                lessonDate: newSlotDate,
+                lessonTime: newSlotTime,
+                rescheduleCount: r.rescheduleCount + 1,
+              }
+            : r
+        )
+      );
+      closeReschedule();
+    } catch (err: any) {
+      console.error("日程変更エラー:", err);
+      alert(
+        err?.message ||
+          "日程変更に失敗しました。時間をおいて再度お試しください。"
+      );
+    } finally {
+      setRescheduleSubmitting(false);
+    }
+  };
 
   const handleCancel = async (res: Reservation) => {
     const confirmed = window.confirm(
@@ -137,8 +233,10 @@ const StudentReservations: React.FC = () => {
           const d = docSnap.data();
           return {
             id: docSnap.id,
+            teacherId: typeof d.teacherId === "string" ? d.teacherId : "",
             teacherName: typeof d.teacherName === "string" ? d.teacherName : "",
             lessonCourse: typeof d.lessonCourse === "string" ? d.lessonCourse : "",
+            lessonType: typeof d.lessonType === "string" ? d.lessonType : "",
             lessonDate: typeof d.lessonDate === "string" ? d.lessonDate : "",
             lessonTime: typeof d.lessonTime === "string" ? d.lessonTime : "",
             location: typeof d.location === "string" ? d.location : "",
@@ -148,6 +246,8 @@ const StudentReservations: React.FC = () => {
               typeof d.paymentStatus === "string" ? d.paymentStatus : "",
             reservationStatus:
               typeof d.reservationStatus === "string" ? d.reservationStatus : "",
+            rescheduleCount:
+              typeof d.rescheduleCount === "number" ? d.rescheduleCount : 0,
             notes: typeof d.notes === "string" ? d.notes : "",
           };
         });
@@ -255,6 +355,85 @@ const StudentReservations: React.FC = () => {
                       ? "キャンセルはレッスン前日まで可能です（お支払い前のため課金なし）。当日のキャンセルはお問い合わせください。"
                       : "キャンセルはレッスン前日まで可能です（全額返金）。当日のキャンセルはお問い合わせください。"}
                   </p>
+                </div>
+              )}
+
+              {isReschedulable(res) && (
+                <div style={{ marginTop: "12px" }}>
+                  {reschedulingId === res.id ? (
+                    <div
+                      style={{
+                        border: "1px solid #e0dccf",
+                        borderRadius: 8,
+                        padding: 12,
+                      }}
+                    >
+                      <p style={{ margin: "0 0 8px", fontWeight: "bold" }}>
+                        新しい日時を選んでください（{res.lessonType}のレッスン）
+                      </p>
+                      <BookingCalendar
+                        teacherId={res.teacherId}
+                        requiredMethod={res.lessonType}
+                        displayMonth={rescheduleMonth}
+                        onChangeMonth={(m: Date) => setRescheduleMonth(m)}
+                        onDateTimeSelect={(d, t) => {
+                          setNewSlotDate(d);
+                          setNewSlotTime(t);
+                        }}
+                      />
+                      <p style={{ fontSize: 13, color: "#444", margin: "8px 0" }}>
+                        選択中：
+                        {newSlotDate && newSlotTime
+                          ? `${newSlotDate} ${newSlotTime}`
+                          : "未選択"}
+                      </p>
+                      <div
+                        style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+                      >
+                        <button
+                          type="button"
+                          className="form-button"
+                          onClick={() => handleReschedule(res)}
+                          disabled={
+                            rescheduleSubmitting || !newSlotDate || !newSlotTime
+                          }
+                        >
+                          {rescheduleSubmitting
+                            ? "変更中..."
+                            : "この日時に変更する"}
+                        </button>
+                        <button
+                          type="button"
+                          className="form-button"
+                          onClick={closeReschedule}
+                          disabled={rescheduleSubmitting}
+                          style={{ background: "#888", borderColor: "#888" }}
+                        >
+                          やめる
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="form-button"
+                        onClick={() => openReschedule(res)}
+                        style={{ background: "#2e6da4", borderColor: "#2e6da4" }}
+                      >
+                        日程を変更する
+                      </button>
+                      <p
+                        style={{
+                          fontSize: "12px",
+                          color: "#666",
+                          marginTop: "6px",
+                        }}
+                      >
+                        日程変更はレッスン開始前まで、1回まで可能です（追加請求・返金はありません）。
+                      </p>
+                    </>
+                  )}
                 </div>
               )}
             </div>
