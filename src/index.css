@@ -287,8 +287,9 @@ a[href^="mailto"] {
 /* 管理ダッシュボード */
 .admin-page {
   max-width: 1000px;
-  margin: 2rem auto 4rem;
-  padding: 0 1rem;
+  margin: 0 auto 4rem;
+  /* 上余白は固定ヘッダー(120px)分。既存ページ（.about-section 等）と統一。 */
+  padding: 9.5rem 1rem 0;
 }
 
 .admin-toolbar {
@@ -332,6 +333,7 @@ a[href^="mailto"] {
   color: #4a3f2a;
   margin: 0;
   line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .kpi-card .kpi-sub {
@@ -381,6 +383,49 @@ a[href^="mailto"] {
 .admin-table .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/* グラフの軸・凡例の文字サイズ（Recharts の SVG テキスト） */
+.admin-chart-card .recharts-text {
+  font-size: 12px;
+}
+
+/* スマホ最適化 */
+@media (max-width: 600px) {
+  .admin-page {
+    padding: 9.5rem 0.6rem 0;
+  }
+
+  .kpi-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.6rem;
+  }
+
+  .kpi-card {
+    padding: 0.8rem 0.9rem;
+  }
+
+  .kpi-card .kpi-value {
+    font-size: 1.2rem;
+  }
+
+  .admin-chart-card {
+    padding: 1rem 0.4rem 0.4rem;
+  }
+
+  .admin-chart-card h3 {
+    font-size: 0.98rem;
+  }
+
+  .admin-chart-card .recharts-text {
+    font-size: 10px;
+  }
+
+  .admin-table th,
+  .admin-table td {
+    padding: 0.5rem 0.5rem;
+    font-size: 0.9rem;
+  }
 }
 
 /* 特定商取引法に基づく表記 */
