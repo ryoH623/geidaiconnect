@@ -22,8 +22,11 @@ interface Reservation {
 
 const PAYMENT_STATUS_LABELS: Record<string, string> = {
   pending_payment: "決済待ち",
+  authorized: "お支払い前（与信済み）",
   paid: "支払済み",
   refunded: "返金済み",
+  voided: "キャンセル（課金なし）",
+  payment_failed: "決済失敗",
   expired: "期限切れ",
 };
 
@@ -43,7 +46,8 @@ function todayJst(): string {
   return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-// キャンセル可能: 確定・支払済みで、レッスン日が明日以降（前日まで全額返金）
+// キャンセル可能: 確定済みで、決済が「請求済み(paid)」または「与信のみ(authorized)」、
+// かつレッスン日が明日以降（前日まで）。バックエンド cancelReservation の判定と一致させる。
 function isCancellable(res: {
   reservationStatus: string;
   paymentStatus: string;
@@ -51,9 +55,14 @@ function isCancellable(res: {
 }): boolean {
   return (
     res.reservationStatus === "confirmed" &&
-    res.paymentStatus === "paid" &&
+    (res.paymentStatus === "paid" || res.paymentStatus === "authorized") &&
     res.lessonDate > todayJst()
   );
+}
+
+// 与信のみ（未請求）の予約か。請求前は「課金なし」、請求済みは「全額返金」と文言を出し分ける。
+function isPreCharge(res: { paymentStatus: string }): boolean {
+  return res.paymentStatus === "authorized";
 }
 
 const StudentReservations: React.FC = () => {
@@ -68,7 +77,9 @@ const StudentReservations: React.FC = () => {
       `以下の予約をキャンセルします。よろしいですか？\n\n` +
         `${res.teacherName} / ${res.lessonCourse}\n` +
         `${res.lessonDate} ${res.lessonTime}\n\n` +
-        `お支払い済みの料金は全額返金されます。`
+        (isPreCharge(res)
+          ? `お支払い前（カード与信のみ）のため、請求は発生しません。`
+          : `お支払い済みの料金は全額返金されます。`)
     );
     if (!confirmed) return;
 
@@ -82,14 +93,16 @@ const StudentReservations: React.FC = () => {
 
       alert(result.data?.message || "予約をキャンセルしました。");
 
-      // 画面上のステータスを即時反映する
+      // 画面上のステータスを即時反映する。
+      // 与信のみ(authorized)は請求前のため voided、請求済み(paid)は refunded。
+      const nextPaymentStatus = isPreCharge(res) ? "voided" : "refunded";
       setReservations((prev) =>
         prev.map((r) =>
           r.id === res.id
             ? {
                 ...r,
                 reservationStatus: "cancelled",
-                paymentStatus: "refunded",
+                paymentStatus: nextPaymentStatus,
               }
             : r
         )
@@ -233,10 +246,14 @@ const StudentReservations: React.FC = () => {
                   >
                     {cancellingId === res.id
                       ? "キャンセル処理中..."
-                      : "この予約をキャンセルする（全額返金）"}
+                      : isPreCharge(res)
+                        ? "この予約をキャンセルする（請求前・課金なし）"
+                        : "この予約をキャンセルする（全額返金）"}
                   </button>
                   <p style={{ fontSize: "12px", color: "#666", marginTop: "6px" }}>
-                    キャンセルはレッスン前日まで可能です（全額返金）。当日のキャンセルはお問い合わせください。
+                    {isPreCharge(res)
+                      ? "キャンセルはレッスン前日まで可能です（お支払い前のため課金なし）。当日のキャンセルはお問い合わせください。"
+                      : "キャンセルはレッスン前日まで可能です（全額返金）。当日のキャンセルはお問い合わせください。"}
                   </p>
                 </div>
               )}
