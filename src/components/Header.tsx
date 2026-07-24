@@ -26,7 +26,13 @@ export default function Header({ onMenuClick }: HeaderProps) {
   };
 
   const handleSearch = () => {
-    alert(`検索: キーワード=${keyword}, カテゴリ=${category}`);
+    // 検索結果ページ /search は URL の keyword / category を読んで絞り込む。
+    const params = new URLSearchParams();
+    if (keyword.trim()) params.set("keyword", keyword.trim());
+    if (category) params.set("category", category);
+    const qs = params.toString();
+    navigate(qs ? `/search?${qs}` : "/search");
+    setSearchOpen(false);
   };
 
   const handleProfileClick = () => {
@@ -104,6 +110,9 @@ export default function Header({ onMenuClick }: HeaderProps) {
                 placeholder="キーワード"
                 value={keyword}
                 onChange={(e) => setKeyword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSearch();
+                }}
               />
               <select
                 value={category}
