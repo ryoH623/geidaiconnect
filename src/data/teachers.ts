@@ -21,6 +21,8 @@ export interface LessonCourse {
   price: string;
   note?: string;
   locationDisplay?: string;
+  /** 体験レッスンか。true のコースは生徒1人につき1回まで（受講後は選択・表示されない）。 */
+  isTrial?: boolean;
 }
 
 export const teachers: Teacher[] = [
@@ -48,6 +50,7 @@ export const teachers: Teacher[] = [
         title: "30分レッスン（小学生以下・初回体験）",
         price: "4,000円",
         locationDisplay: "東京都世田谷区桜新町",
+        isTrial: true,
       },
       {
         type: "自宅",
