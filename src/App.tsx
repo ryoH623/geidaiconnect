@@ -17,6 +17,7 @@ import Contact from "./pages/Contact";
 import RequestPage from "./pages/RequestPage";
 import TeacherRecruit from "./pages/TeacherRecruit";
 import Terms from "./pages/Terms";
+import LegalNotice from "./pages/LegalNotice";
 import Faq from "./pages/Faq";
 import RequireAdmin from "./components/RequireAdmin";
 import RequireTeacher from "./components/RequireTeacher";
@@ -36,6 +37,10 @@ const TeacherReservations = lazy(
   () => import("./pages/teachers/TeacherReservations")
 );
 const AdminHome = lazy(() => import("./pages/admin/AdminHome"));
+const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
+const AdminStudents = lazy(() => import("./pages/admin/AdminStudents"));
+const AdminTeachers = lazy(() => import("./pages/admin/AdminTeachers"));
+const AdminTeacherDetail = lazy(() => import("./pages/admin/AdminTeacherDetail"));
 const AdminReservations = lazy(() => import("./pages/admin/AdminReservations"));
 const AdminUsers = lazy(() => import("./pages/admin/AdminUsers"));
 const AdminReviews = lazy(() => import("./pages/admin/AdminReviews"));
@@ -65,6 +70,7 @@ function App() {
           {/* 演奏・展示などの依頼フォーム（公開） */}
           <Route path="/request" element={<RequestPage />} />
           <Route path="/terms" element={<Terms />} />
+          <Route path="/legal" element={<LegalNotice />} />
           {/* 講師募集ページ（未ログインの応募者向け・公開） */}
           <Route path="/recruit" element={<TeacherRecruit />} />
 
@@ -140,6 +146,38 @@ function App() {
             element={
               <RequireAdmin>
                 <AdminHome />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/dashboard"
+            element={
+              <RequireAdmin>
+                <AdminDashboard />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/students"
+            element={
+              <RequireAdmin>
+                <AdminStudents />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/teachers"
+            element={
+              <RequireAdmin>
+                <AdminTeachers />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/teachers/:id"
+            element={
+              <RequireAdmin>
+                <AdminTeacherDetail />
               </RequireAdmin>
             }
           />

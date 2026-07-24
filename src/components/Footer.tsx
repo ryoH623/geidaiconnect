@@ -9,6 +9,7 @@ const Footer: React.FC = () => {
         <div className="footer-links">
           <a href="/about">運営者情報</a>
           <a href="/terms">利用規約</a>
+          <a href="/legal">特定商取引法に基づく表記</a>
           <a href="/privacy">プライバシーポリシー</a>
           <a href="/contact">お問い合わせ</a>
           <a href="/recruit">講師募集</a>
