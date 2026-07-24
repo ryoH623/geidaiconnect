@@ -2832,6 +2832,322 @@ export const cancelReservation = https.onCall(
 );
 
 // ========================================
+// Callable: 予約の日程変更（振替）
+// 当日でもレッスン開始前まで／1予約1回まで／自宅・出張のみ（スタジオは対象外）。
+// 支払いはそのまま新しい日時へ移し、新規課金・返金は行わない。
+// ========================================
+const RESCHEDULE_MAX_DAYS_AHEAD = 30;
+
+export const rescheduleReservation = https.onCall(
+  async (
+    data: { reservationId?: string; newDate?: string; newTime?: string },
+    context
+  ): Promise<{ ok: boolean; message: string }> => {
+    if (!context.auth) {
+      throw new https.HttpsError("unauthenticated", "ログインが必要です。");
+    }
+
+    const reservationId =
+      typeof data?.reservationId === "string" ? data.reservationId.trim() : "";
+    const newDate = typeof data?.newDate === "string" ? data.newDate.trim() : "";
+    const newTime = typeof data?.newTime === "string" ? data.newTime.trim() : "";
+
+    if (
+      !reservationId ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(newDate) ||
+      !/^\d{2}:\d{2}$/.test(newTime)
+    ) {
+      throw new https.HttpsError("invalid-argument", "変更内容が正しくありません。");
+    }
+
+    const uid = context.auth.uid;
+    const reservationRef = admin
+      .firestore()
+      .collection("reservations")
+      .doc(reservationId);
+    const snap = await reservationRef.get();
+    if (!snap.exists) {
+      throw new https.HttpsError("not-found", "予約が見つかりませんでした。");
+    }
+    const r = snap.data() || {};
+
+    if (r.userId !== uid) {
+      throw new https.HttpsError(
+        "permission-denied",
+        "この予約を変更する権限がありません。"
+      );
+    }
+
+    // 確定済み & 決済が authorized(与信のみ)/paid(請求済み) のみ日程変更可
+    const reschedulablePaymentStatuses = new Set(["authorized", "paid"]);
+    if (
+      r.reservationStatus !== "confirmed" ||
+      !reschedulablePaymentStatuses.has(String(r.paymentStatus))
+    ) {
+      throw new https.HttpsError(
+        "failed-precondition",
+        "この予約は日程変更できません。"
+      );
+    }
+
+    // スタジオレッスンは当面対象外（スタジオ枠の再ロックが必要なため）
+    const lessonType = typeof r.lessonType === "string" ? r.lessonType : "";
+    if (r.studioId || lessonType === "スタジオ") {
+      throw new https.HttpsError(
+        "failed-precondition",
+        "スタジオレッスンの日程変更は、お手数ですがお問い合わせください。"
+      );
+    }
+    if (lessonType !== "自宅" && lessonType !== "出張") {
+      throw new https.HttpsError(
+        "failed-precondition",
+        "このレッスンは日程変更の対象外です。"
+      );
+    }
+
+    // 日程変更は1予約につき1回まで
+    const rescheduleCount =
+      typeof r.rescheduleCount === "number" ? r.rescheduleCount : 0;
+    if (rescheduleCount >= 1) {
+      throw new https.HttpsError(
+        "failed-precondition",
+        "日程変更は1回までです。以降の変更はお問い合わせください。"
+      );
+    }
+
+    const now = new Date();
+    const origDate = typeof r.lessonDate === "string" ? r.lessonDate : "";
+    const origTime = typeof r.lessonTime === "string" ? r.lessonTime : "";
+    // 元レッスンの開始時刻より前のみ変更可（当日でも開始前ならOK）
+    const origStart = new Date(`${origDate}T${origTime || "00:00"}:00+09:00`);
+    if (!(now < origStart)) {
+      throw new https.HttpsError(
+        "failed-precondition",
+        "レッスン開始後は日程変更できません。"
+      );
+    }
+
+    const newStart = new Date(`${newDate}T${newTime}:00+09:00`);
+    if (!(now < newStart)) {
+      throw new https.HttpsError(
+        "failed-precondition",
+        "変更先はこれからの日時をお選びください。"
+      );
+    }
+    if (newDate > todayJst(RESCHEDULE_MAX_DAYS_AHEAD)) {
+      throw new https.HttpsError(
+        "failed-precondition",
+        `日程変更はレッスンの${RESCHEDULE_MAX_DAYS_AHEAD}日先まででお選びください。`
+      );
+    }
+
+    const teacherId = typeof r.teacherId === "string" ? r.teacherId : "";
+    if (!teacherId) {
+      throw new https.HttpsError("internal", "講師情報が見つかりません。");
+    }
+    const oldScheduleDocId =
+      typeof r.scheduleDocId === "string" ? r.scheduleDocId : "";
+    const newScheduleDocId = buildScheduleDocId(teacherId, newDate, newTime);
+    if (newScheduleDocId === oldScheduleDocId) {
+      throw new https.HttpsError(
+        "failed-precondition",
+        "現在と同じ日時です。別の日時をお選びください。"
+      );
+    }
+
+    // 移動バッファ判定用の候補予約（場所は元予約の座標・キーを流用）
+    const durationMin =
+      typeof r.durationMin === "number" && r.durationMin > 0
+        ? r.durationMin
+        : parseLessonDurationMin(r.lessonCourse);
+    const candStart = timeToMin(newTime);
+    const candBooking: DayBooking = {
+      start: candStart,
+      end: candStart + durationMin,
+      loc: {
+        lat: typeof r.lessonLat === "number" ? r.lessonLat : undefined,
+        lng: typeof r.lessonLng === "number" ? r.lessonLng : undefined,
+        key:
+          typeof r.locationKey === "string" && r.locationKey
+            ? r.locationKey
+            : `res:${reservationId}`,
+      },
+    };
+
+    await admin.firestore().runTransaction(async (tx) => {
+      const newSchedRef = admin
+        .firestore()
+        .collection("schedules")
+        .doc(newScheduleDocId);
+      const newSchedSnap = await tx.get(newSchedRef);
+      if (!newSchedSnap.exists) {
+        throw new https.HttpsError(
+          "not-found",
+          "選択した時間枠は登録されていません。"
+        );
+      }
+      const ns = newSchedSnap.data() || {};
+      const txNow = new Date();
+
+      const nsStatus = String(ns.status || "open").toLowerCase();
+      const nsAvailable =
+        typeof ns.isAvailable === "boolean" ? ns.isAvailable : true;
+      const nsBlocked = !nsAvailable || UNAVAILABLE_STATUSES.has(nsStatus);
+      if (nsBlocked && !isPendingExpired(ns, txNow)) {
+        throw new https.HttpsError(
+          "already-exists",
+          "選択した時間枠はすでに予約済み、または受付停止です。"
+        );
+      }
+
+      // 枠が許可するレッスン方法（自宅/出張）か
+      const allowedMethods = Array.isArray(ns.lessonMethods)
+        ? ns.lessonMethods.filter((v: unknown): v is string => typeof v === "string")
+        : [];
+      if (allowedMethods.length > 0 && !allowedMethods.includes(lessonType)) {
+        throw new https.HttpsError(
+          "failed-precondition",
+          "選択した時間枠では、このレッスン方法は受け付けていません。"
+        );
+      }
+
+      // 新日付での移動時間・重複チェック（自分自身は除外）
+      const dayBookings = await loadTeacherDayBookings(teacherId, newDate, {
+        tx,
+        excludeReservationIds: new Set([reservationId]),
+      });
+      const conflict = findScheduleConflict(candBooking, dayBookings);
+      if (conflict) {
+        if (conflict.type === "overlap") {
+          throw new https.HttpsError(
+            "already-exists",
+            "この時間帯は講師の他の予約と重複しています。別の時間をお選びください。"
+          );
+        }
+        throw new https.HttpsError(
+          "failed-precondition",
+          "前後の予約との間に移動時間が確保できません。別の時間帯をお選びください。"
+        );
+      }
+
+      // 旧枠を再開放するか（この予約が押さえている枠のときだけ）
+      let reopenOldRef: FirebaseFirestore.DocumentReference | null = null;
+      if (oldScheduleDocId) {
+        const oldRef = admin
+          .firestore()
+          .collection("schedules")
+          .doc(oldScheduleDocId);
+        const oldSnap = await tx.get(oldRef);
+        if (
+          oldSnap.exists &&
+          (oldSnap.data() || {}).reservationId === reservationId
+        ) {
+          reopenOldRef = oldRef;
+        }
+      }
+
+      // --- 書き込み ---
+      // 新しい枠を確保
+      tx.set(
+        newSchedRef,
+        {
+          status: "reserved",
+          isAvailable: false,
+          reservationId,
+          reservedAt: admin.firestore.FieldValue.serverTimestamp(),
+          pendingReservationId: admin.firestore.FieldValue.delete(),
+          pendingUserId: admin.firestore.FieldValue.delete(),
+          pendingExpiresAt: admin.firestore.FieldValue.delete(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      // 旧枠を再開放
+      if (reopenOldRef) {
+        tx.set(
+          reopenOldRef,
+          {
+            status: "open",
+            isAvailable: true,
+            reservationId: admin.firestore.FieldValue.delete(),
+            reservedAt: admin.firestore.FieldValue.delete(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+
+      // 予約本体を新日時へ。支払いはそのまま、締切キャプチャ予定を新レッスン前日に。
+      tx.set(
+        reservationRef,
+        {
+          lessonDate: newDate,
+          lessonTime: newTime,
+          scheduleDocId: newScheduleDocId,
+          chargeDueAt: chargeDueTimestamp(newDate),
+          rescheduleCount: rescheduleCount + 1,
+          rescheduledAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    });
+
+    logger.info("rescheduleReservation success", {
+      reservationId,
+      uid,
+      from: `${origDate} ${origTime}`,
+      to: `${newDate} ${newTime}`,
+    });
+
+    // 通知メール（失敗しても振替自体は成功として返す）
+    const updated = { ...r, lessonDate: newDate, lessonTime: newTime };
+    const studentEmail = studentEmailOf(r);
+    if (studentEmail) {
+      await sendMailSafe({
+        to: studentEmail,
+        subject: "【Geidai Connect】ご予約の日程を変更しました",
+        html: buildInfoMailHtml({
+          greetingName: String(r.name || "ご利用者"),
+          intro: [
+            "以下のとおり、ご予約の日程を変更しました。",
+            `変更前：${origDate} ${origTime}`,
+          ],
+          rows: reservationRows(updated),
+          outro: ["当日はお気をつけてお越しください。"],
+        }),
+      });
+    }
+
+    if (teacherId) {
+      const teacher = await getUserContact(teacherId);
+      if (teacher.email) {
+        await sendMailSafe({
+          to: teacher.email,
+          subject: "【Geidai Connect】予約の日程が変更されました",
+          html: buildInfoMailHtml({
+            greetingName:
+              teacher.displayName || String(r.teacherName || "講師"),
+            intro: [
+              "生徒により予約の日程が変更されました。",
+              `変更前：${origDate} ${origTime}`,
+              "変更前の時間枠は再度予約可能な状態に戻っています。",
+            ],
+            rows: [...reservationRows(updated), ["生徒氏名", String(r.name ?? "")]],
+          }),
+        });
+      }
+    }
+
+    return {
+      ok: true,
+      message: `予約を ${newDate} ${newTime} に変更しました。`,
+    };
+  }
+);
+
+// ========================================
 // Callable: お問い合わせフォーム送信（未ログインでも可）
 // ========================================
 export const submitContact = https.onCall(
