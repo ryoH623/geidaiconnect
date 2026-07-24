@@ -25,7 +25,9 @@ service cloud.firestore {
     }
 
     match /reservations/{reservationId} {
-      allow create: if isSignedIn();
+      // 予約の作成は Cloud Functions（Admin SDK, ルールをバイパス）経由のみ。
+      // クライアントからの直接作成は禁止（不正な userId・金額のねじ込みを防ぐ）。
+      allow create: if false;
       // 生徒本人・担当講師・admin が閲覧可能
       allow read: if (isSignedIn()
         && (request.auth.uid == resource.data.userId

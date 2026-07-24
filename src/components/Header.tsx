@@ -49,8 +49,9 @@ export default function Header({ onMenuClick }: HeaderProps) {
       {/* 左：ハンバーガー + 検索 */}
       <div className="left">
         <button className="menu-icon" onClick={() => {
-          setMenuOpen(true);
-          onMenuClick?.();
+          // 検索アイコンと挙動を統一：同じアイコンをもう一度押したら閉じる（トグル）
+          if (!menuOpen) onMenuClick?.();
+          setMenuOpen(!menuOpen);
         }}>
           &#9776;
         </button>
