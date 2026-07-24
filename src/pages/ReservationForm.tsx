@@ -899,6 +899,7 @@ const ReservationForm: React.FC = () => {
 
                 <BookingCalendar
                   teacherId={teacherInfo.authUid}
+                  requiredMethod={displayLessonType}
                   displayMonth={displayMonth}
                   onChangeMonth={(nextMonth: Date) => {
                     console.log('BookingCalendar から月変更:', nextMonth);

@@ -1508,6 +1508,29 @@ export const createReservationAndCheckout = https.onCall(
           supersededReservationIds.add(schedule.pendingReservationId);
         }
 
+        // 講師がこの枠で許可したレッスン方法（自宅/スタジオ/出張）以外での予約を拒否する。
+        // フロント（BookingCalendar）でも絞り込んでいるが、直接呼び出しに備えてサーバー側でも検証する。
+        // lessonMethods が空・未設定の古い枠は後方互換のため通す。
+        const allowedMethods = Array.isArray(schedule.lessonMethods)
+          ? schedule.lessonMethods.filter(
+              (v: unknown): v is string => typeof v === "string"
+            )
+          : [];
+        const KNOWN_LESSON_METHODS = ["自宅", "スタジオ", "出張"];
+        if (
+          lessonType &&
+          KNOWN_LESSON_METHODS.includes(lessonType) &&
+          allowedMethods.length > 0 &&
+          !allowedMethods.includes(lessonType)
+        ) {
+          throw new https.HttpsError(
+            "failed-precondition",
+            "選択した時間枠では、このレッスン方法（" +
+              lessonType +
+              "）は受け付けていません。別の枠をお選びください。"
+          );
+        }
+
         // スタジオロックの確認（他予約が押さえていないか）
         if (studioBookingSnap && studioBookingSnap.exists) {
           const b = studioBookingSnap.data() || {};

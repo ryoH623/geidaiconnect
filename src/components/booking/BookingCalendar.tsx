@@ -26,6 +26,12 @@ type BookingCalendarProps = {
   /** 下書き復元用。初回マウント時だけ選択状態の初期値として使う */
   initialSelectedDate?: string;
   initialSelectedTime?: string;
+  /**
+   * 予約しようとしているレッスン方法（"自宅" | "スタジオ" | "出張"）。
+   * 指定した場合、講師がその方法を許可していない枠（slot.lessonMethods に含まれない枠）は
+   * 予約対象外として非表示・選択不可にする。未指定なら全方法を対象にする。
+   */
+  requiredMethod?: string;
 };
 
 type ScheduleSlot = {
@@ -36,6 +42,8 @@ type ScheduleSlot = {
   status?: string;
   isAvailable?: boolean;
   reserved?: boolean;
+  /** 講師がこの枠で許可したレッスン方法（"自宅" | "スタジオ" | "出張"）。 */
+  lessonMethods: string[];
 };
 
 const SCHEDULES_COLLECTION = "schedules";
@@ -228,10 +236,18 @@ export default function BookingCalendar({
   onDateTimeSelect,
   initialSelectedDate = "",
   initialSelectedTime = "",
+  requiredMethod = "",
 }: BookingCalendarProps) {
   const isReservationMode = Boolean(teacherId && onDateTimeSelect);
   const safeDisplayMonth = displayMonth ?? new Date();
   const today = new Date();
+
+  // 予約しようとしている方法を講師が許可している枠かどうか。
+  // requiredMethod 未指定なら常に true（従来どおり全枠対象）。
+  const slotAllowsMethod = (slot: ScheduleSlot): boolean =>
+    !requiredMethod ||
+    (Array.isArray(slot.lessonMethods) &&
+      slot.lessonMethods.includes(requiredMethod));
 
   // 予約モードの予約可能上限日（本日から MAX_BOOKING_DAYS_AHEAD 日先まで）
   const maxBookingDate = useMemo(() => {
@@ -358,6 +374,11 @@ export default function BookingCalendar({
             isAvailable:
               typeof data.isAvailable === "boolean" ? data.isAvailable : true,
             reserved: typeof data.reserved === "boolean" ? data.reserved : false,
+            lessonMethods: Array.isArray(data.lessonMethods)
+              ? data.lessonMethods.filter(
+                  (v): v is string => typeof v === "string"
+                )
+              : [],
           };
         });
 
@@ -463,7 +484,9 @@ export default function BookingCalendar({
   }, [isReservationMode, teacherId, safeDisplayMonth]);
 
   const reservationAvailableDates = useMemo(() => {
-    const dates = uniqueSorted(reservationSlots.map((slot) => slot.date));
+    const dates = uniqueSorted(
+      reservationSlots.filter(slotAllowsMethod).map((slot) => slot.date)
+    );
 
     console.log("================ BookingCalendar reservationAvailableDates ================");
     console.log("reservationSlots:", reservationSlots);
@@ -471,7 +494,7 @@ export default function BookingCalendar({
     console.log("==========================================================================");
 
     return dates;
-  }, [reservationSlots]);
+  }, [reservationSlots, requiredMethod]);
 
   /** 日付ごとの空き枠数／全枠数。○△× の判定に使う */
   const availabilityByDate = useMemo(() => {
@@ -479,6 +502,8 @@ export default function BookingCalendar({
 
     allReservationSlots.forEach((slot) => {
       if (!slot.date) return;
+      // 予約方法が一致しない枠は集計対象外（○△×の判定にも数えない）
+      if (!slotAllowsMethod(slot)) return;
 
       if (!map[slot.date]) map[slot.date] = { openCount: 0, totalCount: 0 };
 
@@ -491,7 +516,7 @@ export default function BookingCalendar({
     console.log("==================================================================");
 
     return map;
-  }, [allReservationSlots]);
+  }, [allReservationSlots, requiredMethod]);
 
   const reservationTimesForSelectedDate = useMemo(() => {
     if (!selectedReservationDate) {
@@ -501,7 +526,10 @@ export default function BookingCalendar({
 
     const times = uniqueSorted(
       reservationSlots
-        .filter((slot) => slot.date === selectedReservationDate)
+        .filter(
+          (slot) =>
+            slot.date === selectedReservationDate && slotAllowsMethod(slot)
+        )
         .map((slot) => slot.time)
     );
 
@@ -515,7 +543,7 @@ export default function BookingCalendar({
     console.log("======================================================================");
 
     return times;
-  }, [reservationSlots, selectedReservationDate]);
+  }, [reservationSlots, selectedReservationDate, requiredMethod]);
 
   const handlePrevMonth = () => {
     const prevMonth = new Date(
