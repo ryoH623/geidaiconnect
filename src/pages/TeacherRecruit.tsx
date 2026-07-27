@@ -2,8 +2,10 @@
 // 講師募集ページ。上部にサービス利用のメリット紹介、下部に応募フォーム。
 // 送信は callable（submitTeacherApplication）経由で Firestore 保存＋運営宛メール送信。
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase";
+import BudouxText from "../components/BudouxText";
 import { subjects } from "../data/subjects";
 import type { LessonType } from "../data/teachers";
 import AddressCascadeSelect, {
@@ -49,6 +51,11 @@ const MERITS: { title: string; body: string }[] = [
     title: "「藝大OB」というブランドで選ばれる",
     body:
       "GeidaiConnect は東京藝術大学の卒業生・修了生限定のプラットフォームです。あなたの経歴がそのまま信頼となり、質の高いレッスンを求める生徒とマッチングしやすくなります。",
+  },
+  {
+    title: "レッスン以外の「依頼」もお繋ぎします",
+    body:
+      "GeidaiConnect には、結婚式・イベントでの演奏、作品の展示・制作、講演などのご依頼も寄せられます。ご依頼は運営が窓口となって内容をうかがい、ご専門やご希望に合う登録講師へお打診します。レッスンと並行して、演奏・制作のお仕事の機会を広げられます。",
   },
   {
     title: "集客・予約・決済はおまかせ",
@@ -118,7 +125,7 @@ const TeacherRecruit: React.FC = () => {
       next.address = "都道府県・市区町村・町名を選択してください。";
     if (!addressLine.trim()) next.addressLine = "番地・建物名等を入力してください。";
     if (!subject) next.subject = "専攻を選択してください。";
-    if (!graduationYear) next.graduationYear = "卒業年を選択してください。";
+    if (!graduationYear) next.graduationYear = "卒業・修了年を選択してください。";
     if (!homeLesson) next.homeLesson = "自宅レッスンの可否を選択してください。";
     if (lessonTypes.length === 0)
       next.lessonTypes = "希望レッスン形態を1つ以上選択してください。";
@@ -184,22 +191,40 @@ const TeacherRecruit: React.FC = () => {
         <div style={{ display: "flex", justifyContent: "center" }}>
           <div style={{ textAlign: "left", maxWidth: "700px", width: "100%" }}>
             <p style={{ marginBottom: "1.5rem" }}>
-              GeidaiConnect
-              は、東京藝術大学の卒業生・修了生と、本物のレッスンを受けたい生徒をつなぐサービスです。
-              あなたの専門性を活かして、講師として活動してみませんか？
+              <BudouxText>
+                GeidaiConnect
+                は、東京藝術大学の卒業生・修了生と、本物のレッスンを受けたい生徒・演奏や作品を依頼したい方をつなぐサービスです。あなたの専門性を活かして、講師として活動してみませんか？
+              </BudouxText>
             </p>
             {MERITS.map((merit, i) => (
               <div key={merit.title} style={{ marginBottom: "1.25rem" }}>
                 <h3 style={{ marginBottom: "0.4rem" }}>
-                  {i + 1}. {merit.title}
+                  {i + 1}. <BudouxText>{merit.title}</BudouxText>
                 </h3>
-                <p style={{ margin: 0 }}>{merit.body}</p>
+                <p style={{ margin: 0 }}>
+                  <BudouxText>{merit.body}</BudouxText>
+                </p>
               </div>
             ))}
             <div style={{ textAlign: "center", marginTop: "2rem" }}>
               <a href="#recruit-form" className="form-button" style={{ textDecoration: "none" }}>
                 応募フォームへ
               </a>
+              <p
+                style={{
+                  fontSize: "0.9rem",
+                  color: "#666",
+                  marginTop: "1rem",
+                  marginBottom: 0,
+                }}
+              >
+                <BudouxText>演奏・展示・講演などをご依頼したい方は、</BudouxText>
+                {/* グローバルCSSで a は装飾なし・色継承のため、本文中リンクは下線を明示する */}
+                <Link to="/request" style={{ textDecoration: "underline" }}>
+                  お仕事・演奏のご依頼フォーム
+                </Link>
+                <BudouxText>をご利用ください。</BudouxText>
+              </p>
             </div>
           </div>
         </div>
@@ -316,7 +341,12 @@ const TeacherRecruit: React.FC = () => {
                 </div>
 
                 <div className="form-group" style={{ marginBottom: "1rem" }}>
-                  <label htmlFor="recruit-graduation-year">卒業年{requiredMark}</label>
+                  <label htmlFor="recruit-graduation-year">
+                    卒業・修了年{requiredMark}
+                  </label>
+                  <p style={{ fontSize: "0.85rem", color: "#666", margin: "0.2rem 0 0.4rem" }}>
+                    大学院を修了された方は修了年をご入力ください。
+                  </p>
                   <select
                     id="recruit-graduation-year"
                     className="form-input"
