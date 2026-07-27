@@ -615,14 +615,20 @@ type GetAvailableStudiosData = {
   teacherId: string;
   date: string;
   time: string;
-  prefecture: string;
+  /** 都道府県。生徒座標＋半径で検索する場合は不要（県境をまたいで探すため） */
+  prefecture?: string;
   city?: string;
-  /** 生徒が選択した町名の座標（任意）。指定時は生徒からの近い順に並べ替える */
+  /** 生徒の基準地点の座標（町名の代表座標または駅の座標）。指定時は近い順に並べ替える */
   studentLat?: number;
   studentLng?: number;
+  /** 基準地点からの検索半径(km)。座標とセットで指定した場合のみ距離で絞り込む */
+  radiusKm?: number;
   /** レッスン所要時間(分)。移動バッファ判定に使う。未指定時は既定値 */
   durationMin?: number;
 };
+
+/** 半径検索で指定できる最大距離(km)。想定外の巨大値でスキャンが膨らむのを防ぐ */
+const MAX_SEARCH_RADIUS_KM = 50;
 
 type AvailableStudioItem = {
   id: string;
@@ -1121,21 +1127,15 @@ export const getAvailableStudios = https.onCall(
       teacherId,
       date,
       time,
-      prefecture,
+      prefecture = "",
       city = "",
       studentLat,
       studentLng,
+      radiusKm: radiusKmRaw,
       durationMin: durationMinRaw,
     } = data || ({} as GetAvailableStudiosData);
 
-    if (!teacherId || !date || !time || !prefecture) {
-      throw new https.HttpsError(
-        "invalid-argument",
-        "検索に必要な情報（講師・日時・地域）が不足しています。"
-      );
-    }
-
-    // 生徒座標は任意。不正値でも検索自体は壊さない（従来動作にフォールバック）
+    // 生徒座標は任意。不正値でも検索自体は壊さない（地域指定での検索にフォールバック）
     const hasStudentCoords = isValidStudentCoords(studentLat, studentLng);
     if (
       !hasStudentCoords &&
@@ -1147,6 +1147,23 @@ export const getAvailableStudios = https.onCall(
       });
     }
 
+    // 半径での絞り込みは「基準地点の座標」と「半径」が揃ったときだけ有効。
+    // このときは県境をまたいだ最寄りも拾うため、都道府県での絞り込みを行わない。
+    const radiusKm =
+      hasStudentCoords &&
+      typeof radiusKmRaw === "number" &&
+      Number.isFinite(radiusKmRaw) &&
+      radiusKmRaw > 0
+        ? Math.min(radiusKmRaw, MAX_SEARCH_RADIUS_KM)
+        : null;
+
+    if (!teacherId || !date || !time || (!prefecture && !radiusKm)) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "検索に必要な情報（講師・日時・地域）が不足しています。"
+      );
+    }
+
     logger.info("getAvailableStudios start", {
       uid: context.auth.uid,
       teacherId,
@@ -1155,6 +1172,7 @@ export const getAvailableStudios = https.onCall(
       prefecture,
       city,
       hasStudentCoords,
+      radiusKm,
     });
 
     const base = await loadTeacherTravelBase(teacherId);
@@ -1169,13 +1187,13 @@ export const getAvailableStudios = https.onCall(
       ? await loadTeacherDayBookings(teacherId, date)
       : [];
 
-    // 地域（都道府県）で一次絞り込み。複合インデックスを避けるため単一 where のみ使い、
-    // active / city はコード側でフィルタする
-    const snap = await admin
-      .firestore()
-      .collection("studios")
-      .where("prefecture", "==", prefecture)
-      .get();
+    // 半径検索のときは県境をまたいだ最寄りも候補にするため全件を読む
+    // （studios はマスタで件数が少ない）。そうでなければ都道府県で一次絞り込みする。
+    // 複合インデックスを避けるため単一 where のみ使い、active / city はコード側でフィルタする。
+    const studiosRef = admin.firestore().collection("studios");
+    const snap = await (radiusKm
+      ? studiosRef.get()
+      : studiosRef.where("prefecture", "==", prefecture).get());
 
     const results: AvailableStudioItem[] = [];
     const now = new Date();
@@ -1185,8 +1203,22 @@ export const getAvailableStudios = https.onCall(
       const studioId = typeof s.id === "string" && s.id ? s.id : doc.id;
 
       if (s.active === false) continue;
-      if (city && s.city !== city) continue;
       if (typeof s.lat !== "number" || typeof s.lng !== "number") continue;
+
+      // 生徒が指定した基準地点（町名の代表座標または駅）からの直線距離
+      const studentDistanceRawKm = hasStudentCoords
+        ? haversineKm(studentLat as number, studentLng as number, s.lat, s.lng)
+        : null;
+
+      // 0) 生徒からの距離で絞り込む。半径指定がない場合のみ市区町村の一致で絞る
+      //    （市区町村の完全一致だけだと、区が違うだけの最寄りスタジオが落ちてしまうため）
+      if (radiusKm !== null) {
+        if (studentDistanceRawKm === null || studentDistanceRawKm > radiusKm) {
+          continue;
+        }
+      } else if (city && s.city !== city) {
+        continue;
+      }
 
       // 1) 到達可否（拠点からの距離）
       const { reachable, distanceKm } = judgeReachable(base, {
@@ -1229,12 +1261,10 @@ export const getAvailableStudios = https.onCall(
         if (findScheduleConflict(candBooking, dayBookings)) continue;
       }
 
-      // 生徒（選択した町名）からの距離
-      const studentDistanceKm = hasStudentCoords
-        ? Math.round(
-            haversineKm(studentLat as number, studentLng as number, s.lat, s.lng) * 10
-          ) / 10
-        : null;
+      const studentDistanceKm =
+        studentDistanceRawKm === null
+          ? null
+          : Math.round(studentDistanceRawKm * 10) / 10;
 
       results.push({
         id: studioId,
