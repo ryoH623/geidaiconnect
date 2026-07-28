@@ -33,8 +33,13 @@ service cloud.firestore {
         && (request.auth.uid == resource.data.userId
             || request.auth.uid == resource.data.teacherId))
         || isAdmin();
-      allow update: if isSignedIn()
-        && request.auth.uid == resource.data.userId;
+      // 更新もクライアントからは禁止。以前は生徒本人に全フィールドの更新を許していたため、
+      // 生徒が自分の予約の reservationStatus / paymentStatus / lessonAmount を
+      // 書き換えられる状態だった（未決済のまま「確定」にする等）。
+      // キャンセルは cancelReservation、日程変更は rescheduleReservation、
+      // オンラインの参加URLは setMeetingUrl、決済状態は stripeWebhook が
+      // それぞれ Admin SDK（ルールをバイパス）で更新するため、ここは閉じてよい。
+      allow update: if false;
       allow delete: if false;
     }
 
