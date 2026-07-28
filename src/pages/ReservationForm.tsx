@@ -350,6 +350,8 @@ const ReservationForm: React.FC = () => {
 
   // スタジオ予約フローか（レッスン種別が「スタジオ」）
   const isStudioFlow = displayLessonType === 'スタジオ';
+  // オンライン予約フローか。会場がないためレッスン場所は「オンライン」で固定する。
+  const isOnlineFlow = displayLessonType === 'オンライン';
 
   // 市区町村候補は Geolonia 住所マスタ（全市区町村を網羅）から取得。
   // マスタ取得失敗時は静的リスト（citiesByPrefecture）にフォールバック
@@ -459,7 +461,16 @@ const ReservationForm: React.FC = () => {
     };
   }, [authUser]);
 
+  // オンラインは会場がないため、レッスン場所を「オンライン」で固定する
   useEffect(() => {
+    if (!isOnlineFlow) return;
+    setFormData((prev) =>
+      prev.location === 'オンライン' ? prev : { ...prev, location: 'オンライン' }
+    );
+  }, [isOnlineFlow]);
+
+  useEffect(() => {
+    if (isOnlineFlow) return;
     setFormData((prev) => {
       if (prev.location.trim()) return prev;
       if (!displayLocationHint) return prev;
@@ -471,7 +482,7 @@ const ReservationForm: React.FC = () => {
         location: displayLocationHint,
       };
     });
-  }, [displayLocationHint]);
+  }, [displayLocationHint, isOnlineFlow]);
 
   useEffect(() => {
     setFormData((prev) => {
@@ -1476,13 +1487,29 @@ const ReservationForm: React.FC = () => {
 
             <div className="form-group">
               <label>レッスン場所</label>
-              <input
-                type="text"
-                name="location"
-                value={formData.location}
-                onChange={handleChange}
-                className="form-control"
-              />
+              {isOnlineFlow ? (
+                <>
+                  <input
+                    type="text"
+                    name="location"
+                    value="オンライン"
+                    className="form-control"
+                    disabled
+                  />
+                  <p style={{ fontSize: '0.85rem', color: '#666', margin: '0.4rem 0 0' }}>
+                    ビデオ通話で行います。参加URLは予約確定後に講師が登録し、
+                    マイページと前日のリマインドメールでご案内します。
+                  </p>
+                </>
+              ) : (
+                <input
+                  type="text"
+                  name="location"
+                  value={formData.location}
+                  onChange={handleChange}
+                  className="form-control"
+                />
+              )}
               {errors.location && <p className="error">{errors.location}</p>}
             </div>
 

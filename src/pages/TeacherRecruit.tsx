@@ -28,7 +28,7 @@ interface TeacherApplicationPayload {
   bio: string;
 }
 
-const LESSON_TYPES: LessonType[] = ["自宅", "スタジオ", "出張"];
+const LESSON_TYPES: LessonType[] = ["自宅", "スタジオ", "出張", "オンライン"];
 
 /** 出張可能範囲（自宅からの距離・時間）の選択肢 */
 const TRAVEL_RANGES = [

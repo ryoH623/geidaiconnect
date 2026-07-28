@@ -13,7 +13,11 @@ export interface Teacher {
   courses: LessonCourse[];
 }
 
-export type LessonType = "自宅" | "スタジオ" | "出張";
+/**
+ * レッスンの実施方法。
+ * オンラインはビデオ通話で行うため会場がなく、URL はレッスン確定後に講師が登録する。
+ */
+export type LessonType = "自宅" | "スタジオ" | "出張" | "オンライン";
 
 export interface LessonCourse {
   type: LessonType;

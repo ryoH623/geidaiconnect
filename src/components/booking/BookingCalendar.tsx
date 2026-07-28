@@ -199,6 +199,7 @@ function toMethodAbbreviation(label: string): string {
   if (label === "自宅") return "自";
   if (label === "スタジオ") return "ス";
   if (label === "出張") return "出";
+  if (label === "オンライン") return "オ";
   return label.slice(0, 1);
 }
 

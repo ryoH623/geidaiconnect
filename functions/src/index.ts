@@ -277,11 +277,21 @@ function buildInfoMailHtml(params: {
 
 /** 予約内容の共通行（生徒向け・講師向けメールで共用） */
 function reservationRows(r: any): Array<[string, string]> {
+  const isOnline = r?.lessonType === "オンライン";
+  const meetingUrl = typeof r?.meetingUrl === "string" ? r.meetingUrl : "";
+
   return [
     ["講師", String(r?.teacherName ?? "")],
     ["コース", String(r?.lessonCourse ?? "")],
     ["日時", `${r?.lessonDate ?? ""} ${r?.lessonTime ?? ""}`.trim()],
-    ["場所", String(r?.location ?? "")],
+    [
+      "場所",
+      isOnline
+        ? meetingUrl
+          ? `オンライン（参加URL: ${meetingUrl}）`
+          : "オンライン（参加URLは講師から登録され次第ご案内します）"
+        : String(r?.location ?? ""),
+    ],
     [
       "金額",
       typeof r?.lessonAmount === "number"
@@ -754,7 +764,10 @@ function reservationToDayBooking(r: FirebaseFirestore.DocumentData): DayBooking 
       ? r.locationKey
       : r.studioId
         ? `studio:${r.studioId}`
-        : r.lessonType === "自宅"
+        : // オンラインは会場がないが、講師は自宅等の拠点から実施する前提。
+          // 拠点と同じ扱いにすると、オンライン同士・オンラインと自宅の間で
+          // 移動時間が要求されず、スタジオとの間だけ正しくバッファが効く。
+          r.lessonType === "自宅" || r.lessonType === "オンライン"
           ? `base:${r.teacherId}`
           : r.lessonType === "出張"
             ? `home:${r.userId}`
@@ -1457,8 +1470,9 @@ export const createReservationAndCheckout = https.onCall(
       let candidateLoc: LessonLoc;
       if (studioId) {
         candidateLoc = { lat: studioLat, lng: studioLng, key: `studio:${studioId}` };
-      } else if (lessonType === "自宅") {
+      } else if (lessonType === "自宅" || lessonType === "オンライン") {
         // 自宅レッスンは講師の拠点で実施 → 拠点座標
+        // オンラインも講師は拠点から実施する前提で同じ扱いにする（移動時間が不要になる）
         const base = await loadTeacherTravelBase(teacherId);
         candidateLoc = { lat: base.lat, lng: base.lng, key: `base:${teacherId}` };
       } else if (lessonType === "出張") {
@@ -1546,7 +1560,7 @@ export const createReservationAndCheckout = https.onCall(
               (v: unknown): v is string => typeof v === "string"
             )
           : [];
-        const KNOWN_LESSON_METHODS = ["自宅", "スタジオ", "出張"];
+        const KNOWN_LESSON_METHODS = ["自宅", "スタジオ", "出張", "オンライン"];
         if (
           lessonType &&
           KNOWN_LESSON_METHODS.includes(lessonType) &&
@@ -2928,7 +2942,12 @@ export const rescheduleReservation = https.onCall(
         "スタジオレッスンの日程変更は、お手数ですがお問い合わせください。"
       );
     }
-    if (lessonType !== "自宅" && lessonType !== "出張") {
+    // オンラインは会場の再確保が不要なので日程変更の対象に含める
+    if (
+      lessonType !== "自宅" &&
+      lessonType !== "出張" &&
+      lessonType !== "オンライン"
+    ) {
       throw new https.HttpsError(
         "failed-precondition",
         "このレッスンは日程変更の対象外です。"
@@ -3178,6 +3197,95 @@ export const rescheduleReservation = https.onCall(
 );
 
 // ========================================
+// Callable: オンラインレッスンの参加URLを講師が登録する
+// 予約ドキュメントの update ルールは生徒本人のみに開いているため、
+// 講師からの更新は Admin SDK 経由（この関数）で行う。
+// ========================================
+export const setMeetingUrl = https.onCall(
+  async (
+    data: { reservationId?: string; meetingUrl?: string },
+    context
+  ): Promise<{ ok: boolean; message: string }> => {
+    if (!context.auth) {
+      throw new https.HttpsError("unauthenticated", "ログインが必要です。");
+    }
+
+    const reservationId =
+      typeof data?.reservationId === "string" ? data.reservationId.trim() : "";
+    const meetingUrl =
+      typeof data?.meetingUrl === "string" ? data.meetingUrl.trim() : "";
+
+    if (!reservationId) {
+      throw new https.HttpsError("invalid-argument", "予約が指定されていません。");
+    }
+
+    // 空文字は「URLを取り消す」意味として許可する
+    if (meetingUrl) {
+      if (meetingUrl.length > 500) {
+        throw new https.HttpsError(
+          "invalid-argument",
+          "URLが長すぎます（500文字以内）。"
+        );
+      }
+      // http:// を弾き https のみ許可（生徒に安全でないリンクを送らせない）
+      let parsed: URL;
+      try {
+        parsed = new URL(meetingUrl);
+      } catch {
+        throw new https.HttpsError(
+          "invalid-argument",
+          "URLの形式が正しくありません。https:// から始まるURLを入力してください。"
+        );
+      }
+      if (parsed.protocol !== "https:") {
+        throw new https.HttpsError(
+          "invalid-argument",
+          "https:// から始まるURLを入力してください。"
+        );
+      }
+    }
+
+    const ref = admin.firestore().collection("reservations").doc(reservationId);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      throw new https.HttpsError("not-found", "予約が見つかりません。");
+    }
+
+    const r = snap.data() || {};
+    if (r.teacherId !== context.auth.uid) {
+      throw new https.HttpsError(
+        "permission-denied",
+        "この予約のURLを登録する権限がありません。"
+      );
+    }
+    if (r.lessonType !== "オンライン") {
+      throw new https.HttpsError(
+        "failed-precondition",
+        "オンラインレッスン以外にはURLを登録できません。"
+      );
+    }
+
+    await ref.update({
+      meetingUrl: meetingUrl || null,
+      meetingUrlUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    logger.info("setMeetingUrl updated", {
+      reservationId,
+      teacherId: context.auth.uid,
+      cleared: !meetingUrl,
+    });
+
+    return {
+      ok: true,
+      message: meetingUrl
+        ? "参加URLを登録しました。生徒に案内されます。"
+        : "参加URLを取り消しました。",
+    };
+  }
+);
+
+// ========================================
 // Callable: お問い合わせフォーム送信（未ログインでも可）
 // ========================================
 export const submitContact = https.onCall(
@@ -3403,7 +3511,7 @@ export const submitRequest = https.onCall(
 // ========================================
 // Callable: 講師応募フォーム送信（未ログインでも可）
 // ========================================
-const LESSON_TYPE_VALUES = ["自宅", "スタジオ", "出張"] as const;
+const LESSON_TYPE_VALUES = ["自宅", "スタジオ", "出張", "オンライン"] as const;
 
 export const submitTeacherApplication = https.onCall(
   async (
