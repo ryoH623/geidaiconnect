@@ -3,8 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "../firebase";
+import { ADULT_AGE, calcAge, isValidBirthday } from "../lib/age";
 
 type Gender = "" | "male" | "female" | "other";
+
+/** 保護者（法定代理人）の続柄の選択肢 */
+const GUARDIAN_RELATIONSHIPS = ["父", "母", "祖父", "祖母", "その他の親権者・後見人"];
 
 const Register: React.FC = () => {
   const navigate = useNavigate();
@@ -28,6 +32,12 @@ const Register: React.FC = () => {
   const [birthY, setBirthY] = useState("");
   const [birthM, setBirthM] = useState("");
   const [birthD, setBirthD] = useState("");
+
+  // 保護者（法定代理人）情報。18歳未満のときだけ入力を必須にする。
+  const [guardianName, setGuardianName] = useState("");
+  const [guardianNameKana, setGuardianNameKana] = useState("");
+  const [guardianRelationship, setGuardianRelationship] = useState("");
+  const [guardianPhone, setGuardianPhone] = useState("");
 
   // 規約同意
   const [agree, setAgree] = useState(false);
@@ -56,6 +66,13 @@ const Register: React.FC = () => {
   }, []);
   const months = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"));
   const days = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0"));
+
+  // 入力中の生年月日から算出。未成年なら保護者欄を表示・必須化する。
+  const age = useMemo(
+    () => calcAge({ year: birthY, month: birthM, day: birthD }),
+    [birthY, birthM, birthD]
+  );
+  const minor = age !== null && age < ADULT_AGE;
 
   const handlePostalBlur = async () => {
     if (postalCode.length !== 7) return;
@@ -88,6 +105,28 @@ const Register: React.FC = () => {
     ) {
       setError("必須項目（*）を入力してください。");
       return;
+    }
+
+    if (!isValidBirthday(birthY, birthM, birthD)) {
+      setError("生年月日が正しくありません。実在する日付をお選びください。");
+      return;
+    }
+
+    // 18歳未満は法定代理人（保護者）の情報を必須にする。
+    // 自己申告のチェックだけでなく、誰の同意を得たのかを記録として残すため。
+    if (minor) {
+      if (!guardianName.trim() || !guardianNameKana.trim() || !guardianRelationship) {
+        setError("18歳未満の方は、保護者のお名前・フリガナ・続柄をご入力ください。");
+        return;
+      }
+      if (!/^[ぁ-んー\s　]+$/.test(guardianNameKana.trim())) {
+        setError("保護者のフリガナはひらがなでご入力ください。");
+        return;
+      }
+      if (!/^\d{10,11}$/.test(guardianPhone.replace(/[-\s　]/g, ""))) {
+        setError("保護者の電話番号は10〜11桁の数字でご入力ください。");
+        return;
+      }
     }
 
     if (password !== confirm) {
@@ -138,6 +177,17 @@ const Register: React.FC = () => {
           gender: gender || null,
           birthday: birthY && birthM && birthD
             ? { year: birthY, month: birthM, day: birthD }
+            : null,
+          // 未成年の場合のみ、誰の同意を得たのかを記録として残す。
+          // 年齢は誕生日で変わるため保存せず、birthday から都度算出する。
+          guardian: minor
+            ? {
+                name: guardianName.trim(),
+                nameKana: guardianNameKana.trim(),
+                relationship: guardianRelationship,
+                phone: guardianPhone.replace(/[-\s　]/g, ""),
+                consentedAt: serverTimestamp(),
+              }
             : null,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -273,6 +323,75 @@ const Register: React.FC = () => {
             </select>
           </div>
 
+          {/* 18歳未満のときだけ表示。法定代理人の同意を記録として残すため */}
+          {minor && (
+            <>
+              {/* .form-grid は「ラベル｜入力欄」の2カラムグリッドなので、
+                  見出しだけ row-2 で全幅にし、各項目は直接の子要素として並べる */}
+              <div
+                className="row-2"
+                style={{
+                  border: "1px solid #ddd",
+                  borderRadius: 8,
+                  padding: "0.9rem 1rem",
+                  background: "#fafafa",
+                }}
+              >
+                <p style={{ fontWeight: "bold", margin: "0 0 0.25rem" }}>
+                  保護者（法定代理人）の情報
+                </p>
+                <p style={{ fontSize: "0.85rem", color: "#666", margin: 0 }}>
+                  18歳未満の方のお申し込みには、保護者の方の同意が必要です。
+                  同意された保護者の方の情報をご入力ください。
+                </p>
+              </div>
+
+              <label>保護者のお名前<span className="req">*</span></label>
+              <input
+                type="text"
+                placeholder="例：藝大 太郎"
+                value={guardianName}
+                onChange={(e) => setGuardianName(e.target.value)}
+                maxLength={100}
+                required
+              />
+
+              <label>保護者のフリガナ<span className="req">*</span></label>
+              <input
+                type="text"
+                placeholder="例：げいだい たろう"
+                value={guardianNameKana}
+                onChange={(e) => setGuardianNameKana(e.target.value)}
+                maxLength={100}
+                required
+              />
+
+              <label>続柄<span className="req">*</span></label>
+              <select
+                value={guardianRelationship}
+                onChange={(e) => setGuardianRelationship(e.target.value)}
+                required
+              >
+                <option value="">選択してください</option>
+                {GUARDIAN_RELATIONSHIPS.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+
+              <label>保護者の電話番号<span className="req">*</span></label>
+              <input
+                type="tel"
+                placeholder="例：09012345678"
+                value={guardianPhone}
+                onChange={(e) => setGuardianPhone(e.target.value)}
+                maxLength={20}
+                required
+              />
+            </>
+          )}
+
           <label>パスワード<span className="req">*</span></label>
           <input
             type="password"
@@ -301,7 +420,10 @@ const Register: React.FC = () => {
                 <a href="/terms" target="_blank" rel="noopener noreferrer" className="login-link">
                   利用規約
                 </a>
-                に同意して申込みます。未成年者については法定代理人の同意を得ていることを確認します。
+                に同意して申込みます。
+                {minor
+                  ? "上記の保護者（法定代理人）の同意を得ていることを確認します。"
+                  : "未成年者については法定代理人の同意を得ていることを確認します。"}
               </span>
             </label>
           </div>

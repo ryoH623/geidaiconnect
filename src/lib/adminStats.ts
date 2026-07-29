@@ -1,4 +1,6 @@
 // 管理ダッシュボード用の集計ロジック（純粋関数）。
+import type { Birthday } from "./age";
+
 // 「売上」の定義: GMV = 支払済み(paid)予約の lessonAmount 合計、
 //   手数料(運営の取り分) = GMV × COMMISSION_RATE。計上は lessonDate（レッスン実施日）基準。
 
@@ -25,6 +27,15 @@ export interface UserLite {
   role: string;
   phone: string;
   createdAtMs: number | null;
+  /** 生年月日。年齢・未成年判定に使う（未入力なら null） */
+  birthday: Birthday | null;
+  /** 未成年の場合に登録される保護者（法定代理人）情報 */
+  guardian: {
+    name: string;
+    nameKana: string;
+    relationship: string;
+    phone: string;
+  } | null;
 }
 
 export interface ReviewLite {

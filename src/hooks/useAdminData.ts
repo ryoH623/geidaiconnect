@@ -77,6 +77,25 @@ export function useAdminData(): AdminData {
               role: str(x.role),
               phone: str(x.phone),
               createdAtMs: toMs(x.createdAt),
+              birthday:
+                x.birthday && typeof x.birthday === "object"
+                  ? {
+                      year: str((x.birthday as Record<string, unknown>).year),
+                      month: str((x.birthday as Record<string, unknown>).month),
+                      day: str((x.birthday as Record<string, unknown>).day),
+                    }
+                  : null,
+              guardian:
+                x.guardian && typeof x.guardian === "object"
+                  ? {
+                      name: str((x.guardian as Record<string, unknown>).name),
+                      nameKana: str((x.guardian as Record<string, unknown>).nameKana),
+                      relationship: str(
+                        (x.guardian as Record<string, unknown>).relationship
+                      ),
+                      phone: str((x.guardian as Record<string, unknown>).phone),
+                    }
+                  : null,
             };
           })
         );
