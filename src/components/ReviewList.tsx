@@ -12,12 +12,17 @@ import {
 } from "firebase/firestore";
 
 interface Props {
+  /** 講師の表示名。reviews の teacherId は表示名で保存されている */
   teacherId: string;
+  /** 講師の Firebase Auth uid。返信できるのはこの uid の本人だけ */
+  teacherAuthUid?: string;
 }
 
 type Review = {
   id: string;
   userId?: string;
+  /** 担当講師の uid。これを持たない古いレビューには返信できない */
+  teacherAuthUid?: string;
   rating: number;
   comment: string;
   // 旧データは timestamp フィールドに保存されているため両方を許容する
@@ -31,7 +36,7 @@ function reviewSeconds(r: Review): number {
   return r.createdAt?.seconds ?? r.timestamp?.seconds ?? 0;
 }
 
-export default function ReviewList({ teacherId }: Props) {
+export default function ReviewList({ teacherId, teacherAuthUid }: Props) {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -66,6 +71,14 @@ export default function ReviewList({ teacherId }: Props) {
 
     fetchReviews();
   }, [teacherId]);
+
+  // 返信ボタンを出す条件: ログイン中のユーザーがこのレビューの担当講師本人であること。
+  // teacherAuthUid を持たない古いレビューはルール側でも更新できないため対象外。
+  const canReply = (review: Review): boolean => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || !teacherAuthUid) return false;
+    return uid === teacherAuthUid && review.teacherAuthUid === teacherAuthUid;
+  };
 
   const startEdit = (review: Review) => {
     setEditingId(review.id);
@@ -116,6 +129,7 @@ export default function ReviewList({ teacherId }: Props) {
       setReplyingId(null);
       setReplyText("");
     } catch (err) {
+      console.error("返信の送信に失敗しました:", err);
       alert("返信の送信に失敗しました。");
     }
   };
@@ -191,8 +205,17 @@ export default function ReviewList({ teacherId }: Props) {
                       </button>
                     </>
                   )}
-                  {!r.reply && auth.currentUser && (
-                    <button onClick={() => setReplyingId(r.id)}>返信する</button>
+                  {/* 返信できるのは担当講師本人のみ（Firestore Rules でも
+                      teacherAuthUid が一致する場合の reply 更新だけを許可） */}
+                  {canReply(r) && (
+                    <button
+                      onClick={() => {
+                        setReplyingId(r.id);
+                        setReplyText(r.reply ?? "");
+                      }}
+                    >
+                      {r.reply ? "返信を編集" : "返信する"}
+                    </button>
                   )}
                   {replyingId === r.id && (
                     <div style={{ marginTop: "8px" }}>

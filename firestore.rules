@@ -58,12 +58,20 @@ service cloud.firestore {
       // 入れて投稿できたため、なりすましレビューが可能だった。
       allow create: if isSignedIn()
         && request.auth.uid == request.resource.data.userId;
-      // 編集は投稿者本人のみ。投稿者・対象講師の付け替えは禁止
-      // （他の講師のページへレビューを移動させられないようにする）。
-      allow update: if isSignedIn()
-        && request.auth.uid == resource.data.userId
-        && request.resource.data.userId == resource.data.userId
-        && request.resource.data.teacherId == resource.data.teacherId;
+      // 更新できるのは次の2通りだけ。変更できるフィールドも限定する。
+      //  - 投稿者本人: 本文と評価のみ（投稿者・対象講師の付け替えや、
+      //    講師になりすまして reply を書くことを防ぐ）
+      //  - 担当講師: reply のみ（teacherAuthUid が自分の uid のレビューに限る）
+      // teacherAuthUid を持たない古いレビューには講師は返信できない。
+      allow update: if isSignedIn() && (
+        (request.auth.uid == resource.data.userId
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['comment', 'rating']))
+        ||
+        (request.auth.uid == resource.data.get('teacherAuthUid', '')
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['reply']))
+      );
       // 削除は投稿者本人または admin（不適切レビュー対応）
       allow delete: if (isSignedIn()
         && request.auth.uid == resource.data.userId)
