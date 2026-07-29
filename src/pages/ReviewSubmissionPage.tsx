@@ -3,10 +3,15 @@ import React, { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { db, auth } from "../firebase";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { teachers } from "../data/teachers";
 
 export default function ReviewSubmissionPage() {
   const [searchParams] = useSearchParams();
+  // teacherId には講師の表示名が入る（既存データとの互換のため変更しない）。
+  // 講師が返信できるようにするため、表示名から authUid を引いて併せて保存する。
   const teacherId = searchParams.get("teacher");
+  const teacherAuthUid =
+    teachers.find((t) => t.name === teacherId)?.authUid || "";
   const [rating, setRating] = useState("");
   const [comment, setComment] = useState("");
 
@@ -22,6 +27,7 @@ export default function ReviewSubmissionPage() {
     try {
       await addDoc(collection(db, "reviews"), {
         teacherId,
+        teacherAuthUid,
         userId: user.uid,
         rating: Number(rating),
         comment,

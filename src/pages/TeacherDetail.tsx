@@ -291,7 +291,7 @@ const TeacherDetail: React.FC = () => {
         </div>
 
         {/* レビューは既存データとの互換のため講師名をキーにしている */}
-        <ReviewList teacherId={teacher.name} />
+        <ReviewList teacherId={teacher.name} teacherAuthUid={teacher.authUid} />
       </div>
     </main>
   );
