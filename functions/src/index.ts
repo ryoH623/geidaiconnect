@@ -277,11 +277,21 @@ function buildInfoMailHtml(params: {
 
 /** 予約内容の共通行（生徒向け・講師向けメールで共用） */
 function reservationRows(r: any): Array<[string, string]> {
+  const isOnline = r?.lessonType === "オンライン";
+  const meetingUrl = typeof r?.meetingUrl === "string" ? r.meetingUrl : "";
+
   return [
     ["講師", String(r?.teacherName ?? "")],
     ["コース", String(r?.lessonCourse ?? "")],
     ["日時", `${r?.lessonDate ?? ""} ${r?.lessonTime ?? ""}`.trim()],
-    ["場所", String(r?.location ?? "")],
+    [
+      "場所",
+      isOnline
+        ? meetingUrl
+          ? `オンライン（参加URL: ${meetingUrl}）`
+          : "オンライン（参加URLは講師から登録され次第ご案内します）"
+        : String(r?.location ?? ""),
+    ],
     [
       "金額",
       typeof r?.lessonAmount === "number"
@@ -615,14 +625,20 @@ type GetAvailableStudiosData = {
   teacherId: string;
   date: string;
   time: string;
-  prefecture: string;
+  /** 都道府県。生徒座標＋半径で検索する場合は不要（県境をまたいで探すため） */
+  prefecture?: string;
   city?: string;
-  /** 生徒が選択した町名の座標（任意）。指定時は生徒からの近い順に並べ替える */
+  /** 生徒の基準地点の座標（町名の代表座標または駅の座標）。指定時は近い順に並べ替える */
   studentLat?: number;
   studentLng?: number;
+  /** 基準地点からの検索半径(km)。座標とセットで指定した場合のみ距離で絞り込む */
+  radiusKm?: number;
   /** レッスン所要時間(分)。移動バッファ判定に使う。未指定時は既定値 */
   durationMin?: number;
 };
+
+/** 半径検索で指定できる最大距離(km)。想定外の巨大値でスキャンが膨らむのを防ぐ */
+const MAX_SEARCH_RADIUS_KM = 50;
 
 type AvailableStudioItem = {
   id: string;
@@ -748,7 +764,10 @@ function reservationToDayBooking(r: FirebaseFirestore.DocumentData): DayBooking 
       ? r.locationKey
       : r.studioId
         ? `studio:${r.studioId}`
-        : r.lessonType === "自宅"
+        : // オンラインは会場がないが、講師は自宅等の拠点から実施する前提。
+          // 拠点と同じ扱いにすると、オンライン同士・オンラインと自宅の間で
+          // 移動時間が要求されず、スタジオとの間だけ正しくバッファが効く。
+          r.lessonType === "自宅" || r.lessonType === "オンライン"
           ? `base:${r.teacherId}`
           : r.lessonType === "出張"
             ? `home:${r.userId}`
@@ -1121,21 +1140,15 @@ export const getAvailableStudios = https.onCall(
       teacherId,
       date,
       time,
-      prefecture,
+      prefecture = "",
       city = "",
       studentLat,
       studentLng,
+      radiusKm: radiusKmRaw,
       durationMin: durationMinRaw,
     } = data || ({} as GetAvailableStudiosData);
 
-    if (!teacherId || !date || !time || !prefecture) {
-      throw new https.HttpsError(
-        "invalid-argument",
-        "検索に必要な情報（講師・日時・地域）が不足しています。"
-      );
-    }
-
-    // 生徒座標は任意。不正値でも検索自体は壊さない（従来動作にフォールバック）
+    // 生徒座標は任意。不正値でも検索自体は壊さない（地域指定での検索にフォールバック）
     const hasStudentCoords = isValidStudentCoords(studentLat, studentLng);
     if (
       !hasStudentCoords &&
@@ -1147,6 +1160,23 @@ export const getAvailableStudios = https.onCall(
       });
     }
 
+    // 半径での絞り込みは「基準地点の座標」と「半径」が揃ったときだけ有効。
+    // このときは県境をまたいだ最寄りも拾うため、都道府県での絞り込みを行わない。
+    const radiusKm =
+      hasStudentCoords &&
+      typeof radiusKmRaw === "number" &&
+      Number.isFinite(radiusKmRaw) &&
+      radiusKmRaw > 0
+        ? Math.min(radiusKmRaw, MAX_SEARCH_RADIUS_KM)
+        : null;
+
+    if (!teacherId || !date || !time || (!prefecture && !radiusKm)) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "検索に必要な情報（講師・日時・地域）が不足しています。"
+      );
+    }
+
     logger.info("getAvailableStudios start", {
       uid: context.auth.uid,
       teacherId,
@@ -1155,6 +1185,7 @@ export const getAvailableStudios = https.onCall(
       prefecture,
       city,
       hasStudentCoords,
+      radiusKm,
     });
 
     const base = await loadTeacherTravelBase(teacherId);
@@ -1169,13 +1200,13 @@ export const getAvailableStudios = https.onCall(
       ? await loadTeacherDayBookings(teacherId, date)
       : [];
 
-    // 地域（都道府県）で一次絞り込み。複合インデックスを避けるため単一 where のみ使い、
-    // active / city はコード側でフィルタする
-    const snap = await admin
-      .firestore()
-      .collection("studios")
-      .where("prefecture", "==", prefecture)
-      .get();
+    // 半径検索のときは県境をまたいだ最寄りも候補にするため全件を読む
+    // （studios はマスタで件数が少ない）。そうでなければ都道府県で一次絞り込みする。
+    // 複合インデックスを避けるため単一 where のみ使い、active / city はコード側でフィルタする。
+    const studiosRef = admin.firestore().collection("studios");
+    const snap = await (radiusKm
+      ? studiosRef.get()
+      : studiosRef.where("prefecture", "==", prefecture).get());
 
     const results: AvailableStudioItem[] = [];
     const now = new Date();
@@ -1185,8 +1216,22 @@ export const getAvailableStudios = https.onCall(
       const studioId = typeof s.id === "string" && s.id ? s.id : doc.id;
 
       if (s.active === false) continue;
-      if (city && s.city !== city) continue;
       if (typeof s.lat !== "number" || typeof s.lng !== "number") continue;
+
+      // 生徒が指定した基準地点（町名の代表座標または駅）からの直線距離
+      const studentDistanceRawKm = hasStudentCoords
+        ? haversineKm(studentLat as number, studentLng as number, s.lat, s.lng)
+        : null;
+
+      // 0) 生徒からの距離で絞り込む。半径指定がない場合のみ市区町村の一致で絞る
+      //    （市区町村の完全一致だけだと、区が違うだけの最寄りスタジオが落ちてしまうため）
+      if (radiusKm !== null) {
+        if (studentDistanceRawKm === null || studentDistanceRawKm > radiusKm) {
+          continue;
+        }
+      } else if (city && s.city !== city) {
+        continue;
+      }
 
       // 1) 到達可否（拠点からの距離）
       const { reachable, distanceKm } = judgeReachable(base, {
@@ -1229,12 +1274,10 @@ export const getAvailableStudios = https.onCall(
         if (findScheduleConflict(candBooking, dayBookings)) continue;
       }
 
-      // 生徒（選択した町名）からの距離
-      const studentDistanceKm = hasStudentCoords
-        ? Math.round(
-            haversineKm(studentLat as number, studentLng as number, s.lat, s.lng) * 10
-          ) / 10
-        : null;
+      const studentDistanceKm =
+        studentDistanceRawKm === null
+          ? null
+          : Math.round(studentDistanceRawKm * 10) / 10;
 
       results.push({
         id: studioId,
@@ -1427,8 +1470,9 @@ export const createReservationAndCheckout = https.onCall(
       let candidateLoc: LessonLoc;
       if (studioId) {
         candidateLoc = { lat: studioLat, lng: studioLng, key: `studio:${studioId}` };
-      } else if (lessonType === "自宅") {
+      } else if (lessonType === "自宅" || lessonType === "オンライン") {
         // 自宅レッスンは講師の拠点で実施 → 拠点座標
+        // オンラインも講師は拠点から実施する前提で同じ扱いにする（移動時間が不要になる）
         const base = await loadTeacherTravelBase(teacherId);
         candidateLoc = { lat: base.lat, lng: base.lng, key: `base:${teacherId}` };
       } else if (lessonType === "出張") {
@@ -1516,7 +1560,7 @@ export const createReservationAndCheckout = https.onCall(
               (v: unknown): v is string => typeof v === "string"
             )
           : [];
-        const KNOWN_LESSON_METHODS = ["自宅", "スタジオ", "出張"];
+        const KNOWN_LESSON_METHODS = ["自宅", "スタジオ", "出張", "オンライン"];
         if (
           lessonType &&
           KNOWN_LESSON_METHODS.includes(lessonType) &&
@@ -2898,7 +2942,12 @@ export const rescheduleReservation = https.onCall(
         "スタジオレッスンの日程変更は、お手数ですがお問い合わせください。"
       );
     }
-    if (lessonType !== "自宅" && lessonType !== "出張") {
+    // オンラインは会場の再確保が不要なので日程変更の対象に含める
+    if (
+      lessonType !== "自宅" &&
+      lessonType !== "出張" &&
+      lessonType !== "オンライン"
+    ) {
       throw new https.HttpsError(
         "failed-precondition",
         "このレッスンは日程変更の対象外です。"
@@ -3148,6 +3197,95 @@ export const rescheduleReservation = https.onCall(
 );
 
 // ========================================
+// Callable: オンラインレッスンの参加URLを講師が登録する
+// 予約ドキュメントの update ルールは生徒本人のみに開いているため、
+// 講師からの更新は Admin SDK 経由（この関数）で行う。
+// ========================================
+export const setMeetingUrl = https.onCall(
+  async (
+    data: { reservationId?: string; meetingUrl?: string },
+    context
+  ): Promise<{ ok: boolean; message: string }> => {
+    if (!context.auth) {
+      throw new https.HttpsError("unauthenticated", "ログインが必要です。");
+    }
+
+    const reservationId =
+      typeof data?.reservationId === "string" ? data.reservationId.trim() : "";
+    const meetingUrl =
+      typeof data?.meetingUrl === "string" ? data.meetingUrl.trim() : "";
+
+    if (!reservationId) {
+      throw new https.HttpsError("invalid-argument", "予約が指定されていません。");
+    }
+
+    // 空文字は「URLを取り消す」意味として許可する
+    if (meetingUrl) {
+      if (meetingUrl.length > 500) {
+        throw new https.HttpsError(
+          "invalid-argument",
+          "URLが長すぎます（500文字以内）。"
+        );
+      }
+      // http:// を弾き https のみ許可（生徒に安全でないリンクを送らせない）
+      let parsed: URL;
+      try {
+        parsed = new URL(meetingUrl);
+      } catch {
+        throw new https.HttpsError(
+          "invalid-argument",
+          "URLの形式が正しくありません。https:// から始まるURLを入力してください。"
+        );
+      }
+      if (parsed.protocol !== "https:") {
+        throw new https.HttpsError(
+          "invalid-argument",
+          "https:// から始まるURLを入力してください。"
+        );
+      }
+    }
+
+    const ref = admin.firestore().collection("reservations").doc(reservationId);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      throw new https.HttpsError("not-found", "予約が見つかりません。");
+    }
+
+    const r = snap.data() || {};
+    if (r.teacherId !== context.auth.uid) {
+      throw new https.HttpsError(
+        "permission-denied",
+        "この予約のURLを登録する権限がありません。"
+      );
+    }
+    if (r.lessonType !== "オンライン") {
+      throw new https.HttpsError(
+        "failed-precondition",
+        "オンラインレッスン以外にはURLを登録できません。"
+      );
+    }
+
+    await ref.update({
+      meetingUrl: meetingUrl || null,
+      meetingUrlUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    logger.info("setMeetingUrl updated", {
+      reservationId,
+      teacherId: context.auth.uid,
+      cleared: !meetingUrl,
+    });
+
+    return {
+      ok: true,
+      message: meetingUrl
+        ? "参加URLを登録しました。生徒に案内されます。"
+        : "参加URLを取り消しました。",
+    };
+  }
+);
+
+// ========================================
 // Callable: お問い合わせフォーム送信（未ログインでも可）
 // ========================================
 export const submitContact = https.onCall(
@@ -3373,7 +3511,7 @@ export const submitRequest = https.onCall(
 // ========================================
 // Callable: 講師応募フォーム送信（未ログインでも可）
 // ========================================
-const LESSON_TYPE_VALUES = ["自宅", "スタジオ", "出張"] as const;
+const LESSON_TYPE_VALUES = ["自宅", "スタジオ", "出張", "オンライン"] as const;
 
 export const submitTeacherApplication = https.onCall(
   async (

@@ -9,6 +9,8 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { tagIconMap } from "../utils/tagIconMap";
 import { buildReserveUrl } from "../utils/reserveUrl";
 import { useAuth } from "../contexts/AuthContext";
+import { db } from "../firebase";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import "../index.css";
 
 const TeacherDetail: React.FC = () => {
@@ -44,6 +46,54 @@ const TeacherDetail: React.FC = () => {
       console.warn("コース選択の保存に失敗しました:", error);
     }
   }, [courseStorageKey, selectedCourse]);
+
+  // 体験レッスンは生徒1人につき1回まで。この講師で既に体験を受講済みかどうかを判定する。
+  // （確定済み＝confirmed の予約で、コース名が体験コースのものがあれば「受講済み」）
+  const [trialUsed, setTrialUsed] = useState(false);
+
+  useEffect(() => {
+    if (!teacher || !teacher.authUid || !user) {
+      setTrialUsed(false);
+      return;
+    }
+    const trialTitles = teacher.courses
+      .filter((c) => c.isTrial)
+      .map((c) => c.title);
+    if (trialTitles.length === 0) {
+      setTrialUsed(false);
+      return;
+    }
+
+    let alive = true;
+    (async () => {
+      try {
+        const q = query(
+          collection(db, "reservations"),
+          where("userId", "==", user.uid)
+        );
+        const snap = await getDocs(q);
+        const used = snap.docs.some((docSnap) => {
+          const r = docSnap.data();
+          return (
+            r.teacherId === teacher.authUid &&
+            r.reservationStatus === "confirmed" &&
+            trialTitles.includes(r.lessonCourse)
+          );
+        });
+        if (alive) setTrialUsed(used);
+      } catch (error) {
+        console.error("体験レッスンの受講判定に失敗しました:", error);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [teacher, user]);
+
+  // 受講済みで、復元された選択が体験コースだった場合は選択を解除する。
+  useEffect(() => {
+    if (trialUsed && selectedCourse?.isTrial) setSelectedCourse(null);
+  }, [trialUsed, selectedCourse]);
 
   if (!teacher) {
     return (
@@ -168,7 +218,9 @@ const TeacherDetail: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {teacher.courses.map((course, i) => (
+                  {teacher.courses
+                    .filter((course) => !(course.isTrial && trialUsed))
+                    .map((course, i) => (
                     <tr key={i}>
                       <td>
                         <input
@@ -198,6 +250,11 @@ const TeacherDetail: React.FC = () => {
                 </tbody>
               </table>
             </form>
+            {trialUsed && teacher.courses.some((c) => c.isTrial) && (
+              <p style={{ fontSize: "0.85rem", color: "#8a8270", marginTop: "0.5rem" }}>
+                ※体験レッスンは1回のみです。受講済みのため一覧に表示していません。
+              </p>
+            )}
           </div>
         )}
 

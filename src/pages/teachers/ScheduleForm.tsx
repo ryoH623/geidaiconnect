@@ -83,7 +83,7 @@ const TIME_SLOTS: string[] = [
   "21:30",
 ];
 
-const LESSON_METHODS = ["自宅", "スタジオ", "出張"] as const;
+const LESSON_METHODS = ["自宅", "スタジオ", "出張", "オンライン"] as const;
 
 const WEEKDAY_OPTIONS = [
   { value: 1, label: "月曜" },

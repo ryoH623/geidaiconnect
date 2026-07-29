@@ -13,7 +13,11 @@ export interface Teacher {
   courses: LessonCourse[];
 }
 
-export type LessonType = "自宅" | "スタジオ" | "出張";
+/**
+ * レッスンの実施方法。
+ * オンラインはビデオ通話で行うため会場がなく、URL はレッスン確定後に講師が登録する。
+ */
+export type LessonType = "自宅" | "スタジオ" | "出張" | "オンライン";
 
 export interface LessonCourse {
   type: LessonType;
@@ -21,6 +25,8 @@ export interface LessonCourse {
   price: string;
   note?: string;
   locationDisplay?: string;
+  /** 体験レッスンか。true のコースは生徒1人につき1回まで（受講後は選択・表示されない）。 */
+  isTrial?: boolean;
 }
 
 export const teachers: Teacher[] = [
@@ -48,6 +54,7 @@ export const teachers: Teacher[] = [
         title: "30分レッスン（小学生以下・初回体験）",
         price: "4,000円",
         locationDisplay: "東京都世田谷区桜新町",
+        isTrial: true,
       },
       {
         type: "自宅",

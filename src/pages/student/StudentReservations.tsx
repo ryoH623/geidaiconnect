@@ -13,7 +13,7 @@ interface Reservation {
   teacherId: string;
   teacherName: string;
   lessonCourse: string;
-  lessonType: string; // "自宅" | "スタジオ" | "出張"
+  lessonType: string; // "自宅" | "スタジオ" | "出張" | "オンライン"
   lessonDate: string; // "YYYY-MM-DD"
   lessonTime: string; // "HH:mm"
   location: string;
@@ -21,6 +21,8 @@ interface Reservation {
   paymentStatus: string;
   reservationStatus: string;
   rescheduleCount: number; // 日程変更した回数（1回まで許可）
+  /** オンラインレッスンの参加URL（講師が登録するまで空） */
+  meetingUrl: string;
   notes?: string;
 }
 
@@ -76,13 +78,15 @@ function lessonStartMs(res: { lessonDate: string; lessonTime: string }): number 
   ).getTime();
 }
 
-// 日程変更（振替）可能か: 確定・決済済み(paid/authorized)・自宅/出張・未振替・レッスン開始前。
+// 日程変更（振替）可能か: 確定・決済済み(paid/authorized)・自宅/出張/オンライン・未振替・レッスン開始前。
 // バックエンド rescheduleReservation の判定と一致させる。
 function isReschedulable(res: Reservation): boolean {
   return (
     res.reservationStatus === "confirmed" &&
     (res.paymentStatus === "paid" || res.paymentStatus === "authorized") &&
-    (res.lessonType === "自宅" || res.lessonType === "出張") &&
+    (res.lessonType === "自宅" ||
+      res.lessonType === "出張" ||
+      res.lessonType === "オンライン") &&
     res.rescheduleCount < 1 &&
     Date.now() < lessonStartMs(res)
   );
@@ -240,6 +244,7 @@ const StudentReservations: React.FC = () => {
             lessonDate: typeof d.lessonDate === "string" ? d.lessonDate : "",
             lessonTime: typeof d.lessonTime === "string" ? d.lessonTime : "",
             location: typeof d.location === "string" ? d.location : "",
+            meetingUrl: typeof d.meetingUrl === "string" ? d.meetingUrl : "",
             lessonAmount:
               typeof d.lessonAmount === "number" ? d.lessonAmount : null,
             paymentStatus:
@@ -311,8 +316,28 @@ const StudentReservations: React.FC = () => {
                 </p>
                 <p>
                   <strong>場所：</strong>
-                  {res.location}
+                  {res.lessonType === "オンライン" ? "オンライン" : res.location}
                 </p>
+                {res.lessonType === "オンライン" &&
+                  res.reservationStatus !== "cancelled" && (
+                    <p>
+                      <strong>参加URL：</strong>
+                      {res.meetingUrl ? (
+                        <a
+                          href={res.meetingUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ textDecoration: "underline" }}
+                        >
+                          {res.meetingUrl}
+                        </a>
+                      ) : (
+                        <span style={{ color: "#666" }}>
+                          講師が登録し次第、こちらと前日のメールでご案内します。
+                        </span>
+                      )}
+                    </p>
+                  )}
                 <p>
                   <strong>料金：</strong>
                   {typeof res.lessonAmount === "number"

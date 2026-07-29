@@ -1,118 +1,117 @@
-import React, { useState, useEffect } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
-import { teachers } from "../data/teachers";
+// 検索結果ページ（/search?keyword=&category=）。
+// レイアウトは他ページに合わせ、白カード枠＋中央見出し＋トップページと同じ講師カードで表示する。
+// 各カードはクリックで講師詳細（/teachers/:id）へ遷移する。
+import React from "react";
+import { useLocation, Link } from "react-router-dom";
+import { teachers, Teacher } from "../data/teachers";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { tagIconMap } from "../utils/tagIconMap";
+import "../index.css";
+
+// コース最安値（例: "4,000円〜"）。トップページと同じ表記。
+function minCoursePrice(teacher: Teacher): string | null {
+  const prices = teacher.courses
+    .map((c) => parseInt(c.price.replace(/[^0-9]/g, ""), 10))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (prices.length === 0) return null;
+  return `${Math.min(...prices).toLocaleString()}円〜`;
+}
 
 const SearchResults: React.FC = () => {
   const location = useLocation();
-  const navigate = useNavigate();
   const searchParams = new URLSearchParams(location.search);
-  const keyword = searchParams.get("keyword")?.toLowerCase() || "";
+  const rawKeyword = searchParams.get("keyword") || "";
+  const keyword = rawKeyword.toLowerCase();
   const category = searchParams.get("category") || "";
 
-  const [selectedTeacherIndex, setSelectedTeacherIndex] = useState<number | null>(null);
-  const [filteredTeachers, setFilteredTeachers] = useState<typeof teachers>([]);
+  const filteredTeachers = teachers.filter((teacher) => {
+    const name = teacher.name?.toLowerCase() || "";
+    const profile = teacher.profile?.toLowerCase() || "";
+    const matchKeyword = keyword
+      ? name.includes(keyword) || profile.includes(keyword)
+      : true;
+    const matchCategory = category ? teacher.genres.includes(category) : true;
+    return matchKeyword && matchCategory;
+  });
 
-  useEffect(() => {
-    const results = teachers.filter((teacher) => {
-      const name = teacher.name?.toLowerCase() || "";
-      const profile = teacher.profile?.toLowerCase() || "";
-      const matchKeyword = keyword
-        ? name.includes(keyword) || profile.includes(keyword)
-        : true;
-      const matchCategory = category
-        ? teacher.genres.includes(category)
-        : true;
-      return matchKeyword && matchCategory;
-    });
-    setFilteredTeachers(results);
-    setSelectedTeacherIndex(null);
-  }, [keyword, category]);
-
-  const handleSelectTeacher = (index: number) => {
-    setSelectedTeacherIndex(index);
-  };
+  const conditions = [
+    category && `ジャンル：${category}`,
+    rawKeyword && `キーワード：${rawKeyword}`,
+  ]
+    .filter(Boolean)
+    .join(" / ");
 
   return (
-    <div className="teacher-section">
-      <h2 className="section-title">該当する講師一覧</h2>
-      <div className="teacher-grid">
-        {filteredTeachers.length > 0 ? (
-          filteredTeachers.map((teacher, index) => (
-            <button
-              key={index}
-              className="teacher-button"
-              onClick={() => handleSelectTeacher(index)}
-            >
-              {teacher.name}（{teacher.genres.join("、")}）
-            </button>
-          ))
-        ) : (
-          <p>該当する講師が見つかりませんでした。</p>
-        )}
-      </div>
+    <main className="about-section fade-in-up">
+      <h2 className="centered-heading-with-border">
+        <span>該当する講師一覧</span>
+      </h2>
 
-      {selectedTeacherIndex !== null && filteredTeachers[selectedTeacherIndex] && (
-        <div className="teacher-card">
-          <img
-            src={filteredTeachers[selectedTeacherIndex].photo}
-            alt={`${filteredTeachers[selectedTeacherIndex].name}の写真`}
-            className="teacher-image"
-          />
-          <div className="teacher-info">
-            <h3 className="teacher-name">{filteredTeachers[selectedTeacherIndex].name}</h3>
-            <p className="teacher-furigana">（{filteredTeachers[selectedTeacherIndex].furigana}）</p>
-            <p className="teacher-subject">ジャンル: {filteredTeachers[selectedTeacherIndex].genres.join("、")}</p>
-            <p className="teacher-location">
-              地域: {filteredTeachers[selectedTeacherIndex].prefecture} {filteredTeachers[selectedTeacherIndex].city}
-            </p>
-            <p className="teacher-profile">{filteredTeachers[selectedTeacherIndex].profile}</p>
+      {conditions && (
+        <p style={{ textAlign: "center", color: "#8a8270", marginTop: "-0.5rem" }}>
+          {conditions}（{filteredTeachers.length}名）
+        </p>
+      )}
 
-            <div className="teacher-tags">
-              {filteredTeachers[selectedTeacherIndex].tags?.map((tag: string, index: number) => (
-                <span key={index} className="tag">
-                  {tagIconMap[tag] && (
-                    <FontAwesomeIcon
-                      icon={tagIconMap[tag]}
-                      style={{ marginRight: "0.3rem" }}
-                    />
-                  )}
-                  {tag}
-                </span>
-              ))}
-            </div>
-
-            <div className="teacher-courses">
-              {filteredTeachers[selectedTeacherIndex].courses.map((c, i) => (
-                <div key={i} className="teacher-course">
-                  <strong>{c.title}</strong>：{c.price}
-                  {c.type === "自宅" && c.locationDisplay && (
-                    <div style={{ fontSize: "0.85rem", color: "#555" }}>
-                      <FontAwesomeIcon icon="location-dot" style={{ marginRight: "0.3rem" }} />
-                      {c.locationDisplay}
+      {filteredTeachers.length > 0 ? (
+        <div className="teacher-card-grid">
+          {filteredTeachers.map((teacher) => {
+            const price = minCoursePrice(teacher);
+            return (
+              <Link
+                key={teacher.id}
+                to={`/teachers/${teacher.id}`}
+                className="tcard"
+              >
+                {teacher.photo && (
+                  <img
+                    src={teacher.photo}
+                    alt={`${teacher.name}の写真`}
+                    className="tcard-photo"
+                    loading="lazy"
+                  />
+                )}
+                <div className="tcard-body">
+                  <p className="tcard-genre">{teacher.genres.join("、")}</p>
+                  <h4 className="tcard-name">
+                    {teacher.name}
+                    <span className="tcard-kana">{teacher.furigana}</span>
+                  </h4>
+                  <p className="tcard-area">
+                    {teacher.prefecture} {teacher.city}
+                  </p>
+                  {teacher.tags && teacher.tags.length > 0 && (
+                    <div className="teacher-tags">
+                      {teacher.tags.map((tag) => (
+                        <span key={tag} className="tag">
+                          {tagIconMap[tag] && (
+                            <FontAwesomeIcon
+                              icon={tagIconMap[tag]}
+                              style={{ marginRight: "0.3rem" }}
+                            />
+                          )}
+                          {tag}
+                        </span>
+                      ))}
                     </div>
                   )}
+                  <div className="tcard-footer">
+                    {price && (
+                      <span className="tcard-price">レッスン {price}</span>
+                    )}
+                    <span className="tcard-cta">詳細・予約へ →</span>
+                  </div>
                 </div>
-              ))}
-            </div>
-
-            <button
-              className="reserve-button"
-              onClick={() =>
-                navigate(
-                  `/reserve?teacher=${encodeURIComponent(
-                    filteredTeachers[selectedTeacherIndex].name
-                  )}`
-                )
-              }
-            >
-              レッスンを予約する
-            </button>
-          </div>
+              </Link>
+            );
+          })}
         </div>
+      ) : (
+        <p className="teacher-empty-note">
+          条件に合う講師が見つかりませんでした。検索条件を変更してお試しください。
+        </p>
       )}
-    </div>
+    </main>
   );
 };
 
