@@ -12,10 +12,19 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
+    // users/{uid}.role が teacher かどうか（スケジュール枠の登録用）
+    function isTeacher() {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher';
+    }
+
     match /users/{uid} {
-      // 作成は本人のみ。自分を admin として作成する権限昇格を防ぐため role は student/teacher に限定。
+      // 作成は本人のみ、かつ role は student 固定。
+      // 以前は teacher も許していたため、リクエストを直接投げれば誰でも講師になれた。
+      // 講師は応募（submitTeacherApplication）→ 運営の審査を経て、
+      // Firebase コンソール / Admin SDK（ルールをバイパス）で role を teacher に変更する。
       allow create: if isSignedIn() && request.auth.uid == uid
-        && request.resource.data.role in ['student', 'teacher'];
+        && request.resource.data.role == 'student';
       allow read: if (isSignedIn() && request.auth.uid == uid) || isAdmin();
       // 更新は本人のみ。ただし role の変更は禁止（admin への自己昇格を防ぐ）。
       // admin 付与は Firebase コンソール / Admin SDK（ルールをバイパス）でのみ行う。
@@ -33,16 +42,28 @@ service cloud.firestore {
         && (request.auth.uid == resource.data.userId
             || request.auth.uid == resource.data.teacherId))
         || isAdmin();
-      allow update: if isSignedIn()
-        && request.auth.uid == resource.data.userId;
+      // 更新もクライアントからは禁止。以前は生徒本人に全フィールドの更新を許していたため、
+      // 生徒が自分の予約の reservationStatus / paymentStatus / lessonAmount を
+      // 書き換えられる状態だった（未決済のまま「確定」にする等）。
+      // キャンセルは cancelReservation、日程変更は rescheduleReservation、
+      // オンラインの参加URLは setMeetingUrl、決済状態は stripeWebhook が
+      // それぞれ Admin SDK（ルールをバイパス）で更新するため、ここは閉じてよい。
+      allow update: if false;
       allow delete: if false;
     }
 
     match /reviews/{reviewId} {
       allow read: if true;
-      allow create: if isSignedIn();
+      // 投稿者は必ず自分自身。以前はログインしていれば userId に他人の ID を
+      // 入れて投稿できたため、なりすましレビューが可能だった。
+      allow create: if isSignedIn()
+        && request.auth.uid == request.resource.data.userId;
+      // 編集は投稿者本人のみ。投稿者・対象講師の付け替えは禁止
+      // （他の講師のページへレビューを移動させられないようにする）。
       allow update: if isSignedIn()
-        && request.auth.uid == resource.data.userId;
+        && request.auth.uid == resource.data.userId
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.teacherId == resource.data.teacherId;
       // 削除は投稿者本人または admin（不適切レビュー対応）
       allow delete: if (isSignedIn()
         && request.auth.uid == resource.data.userId)
@@ -51,9 +72,11 @@ service cloud.firestore {
 
     match /schedules/{scheduleId} {
       allow read: if true;
-      allow create: if isSignedIn()
+      // 枠の登録・編集は role が teacher のアカウントで、かつ自分の枠のみ。
+      // 以前はログインしていれば誰でも（生徒アカウントでも）枠を作れた。
+      allow create: if isTeacher()
         && request.auth.uid == request.resource.data.teacherId;
-      allow update, delete: if isSignedIn()
+      allow update, delete: if isTeacher()
         && request.auth.uid == resource.data.teacherId;
     }
 
