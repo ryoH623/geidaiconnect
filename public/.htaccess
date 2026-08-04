@@ -1,0 +1,12 @@
+# SPA フォールバック（ConoHa WING / Apache）
+# 実ファイル・実ディレクトリが無いリクエストは index.html に流す。
+# これが無いと /faq などへの直接アクセスが 404 になる。
+# public/ に置くことで dist/ に含まれ、自動デプロイで毎回配信される。
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule . /index.html [L]
+</IfModule>
