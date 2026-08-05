@@ -22,7 +22,7 @@ import {
   rateStats,
   availableYears,
   yen,
-  COMMISSION_RATE,
+  COMMISSION_TIERS,
 } from "../../lib/adminStats";
 
 const GOLD = "#b89f6b";
@@ -107,7 +107,13 @@ const AdminDashboard: React.FC = () => {
           ))}
         </select>
         <span style={{ color: "#a49b85", fontSize: "0.85rem" }}>
-          （手数料率 {Math.round(COMMISSION_RATE * 100)}%）
+          （手数料率は逓減制：
+          {COMMISSION_TIERS.map((t) =>
+            t.minCount === 0
+              ? `初回${Math.round(t.rate * 100)}%`
+              : `${t.minCount}回で${Math.round(t.rate * 100)}%`
+          ).join(" → ")}
+          ）
         </span>
       </div>
 
@@ -121,7 +127,10 @@ const AdminDashboard: React.FC = () => {
         <div className="kpi-card">
           <p className="kpi-label">今月の手数料収入</p>
           <p className="kpi-value">{yen(kpis.commission)}</p>
-          <p className="kpi-sub">GMV × {Math.round(COMMISSION_RATE * 100)}%</p>
+          <p className="kpi-sub">
+            実効料率{" "}
+            {kpis.gmv ? ((kpis.commission / kpis.gmv) * 100).toFixed(1) : "0.0"}%
+          </p>
         </div>
         <div className="kpi-card">
           <p className="kpi-label">今月の新規生徒</p>

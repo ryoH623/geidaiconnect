@@ -1,14 +1,17 @@
 // src/pages/teachers/TeacherReservations.tsx
 // 講師用: 自分宛の予約一覧。オンラインレッスンのみ参加URLを登録できる。
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { httpsCallable } from "firebase/functions";
 import { useAuth } from "../../contexts/AuthContext";
 import { db, functions } from "../../firebase";
 import { collection, query, where, getDocs } from "firebase/firestore";
+import { tierProgress } from "../../lib/adminStats";
 
 interface Reservation {
   id: string;
+  /** 生徒の uid。継続回数を生徒ごとに数えるのに使う */
+  userId: string;
   name: string;
   furigana: string;
   email: string;
@@ -21,6 +24,10 @@ interface Reservation {
   lessonAmount: number | null;
   paymentStatus: string;
   reservationStatus: string;
+  /** 予約時点で確定した運営手数料率（逓減制の導入前は null） */
+  commissionRate: number | null;
+  /** 手数料を差し引いた講師の取り分（導入前は null） */
+  teacherPayout: number | null;
   notes?: string;
   /** オンラインレッスンの参加URL（未登録なら空） */
   meetingUrl: string;
@@ -103,6 +110,7 @@ const TeacherReservations: React.FC = () => {
           const d = docSnap.data();
           return {
             id: docSnap.id,
+            userId: typeof d.userId === "string" ? d.userId : "",
             name: typeof d.name === "string" ? d.name : "",
             furigana: typeof d.furigana === "string" ? d.furigana : "",
             email: typeof d.email === "string" ? d.email : "",
@@ -119,6 +127,10 @@ const TeacherReservations: React.FC = () => {
               typeof d.paymentStatus === "string" ? d.paymentStatus : "",
             reservationStatus:
               typeof d.reservationStatus === "string" ? d.reservationStatus : "",
+            commissionRate:
+              typeof d.commissionRate === "number" ? d.commissionRate : null,
+            teacherPayout:
+              typeof d.teacherPayout === "number" ? d.teacherPayout : null,
             notes: typeof d.notes === "string" ? d.notes : "",
           };
         });
@@ -142,6 +154,25 @@ const TeacherReservations: React.FC = () => {
     fetchReservations();
   }, [user]);
 
+  // 生徒ごとの受講回数と、次の割引までの残り回数
+  const studentProgress = useMemo(() => {
+    const byStudent = new Map<string, { name: string; count: number }>();
+    for (const r of reservations) {
+      if (r.paymentStatus !== "paid" || !r.userId) continue;
+      const cur = byStudent.get(r.userId) ?? { name: r.name, count: 0 };
+      cur.count += 1;
+      if (r.name) cur.name = r.name;
+      byStudent.set(r.userId, cur);
+    }
+    return [...byStudent.entries()]
+      .map(([userId, v]) => ({
+        userId,
+        name: v.name || "（氏名不明）",
+        progress: tierProgress(v.count),
+      }))
+      .sort((a, b) => b.progress.count - a.progress.count);
+  }, [reservations]);
+
   return (
     <main className="about-section fade-in-up">
       <h2 className="centered-heading-with-border">
@@ -149,6 +180,51 @@ const TeacherReservations: React.FC = () => {
       </h2>
 
       <div style={{ maxWidth: "720px", margin: "2rem auto" }}>
+        {!loading && !error && studentProgress.length > 0 && (
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #ddd",
+              borderRadius: "10px",
+              padding: "20px",
+              marginBottom: "24px",
+            }}
+          >
+            <h3 style={{ marginTop: 0 }}>継続レッスンによる手数料の割引</h3>
+            <p style={{ color: "#8a8270", fontSize: "0.9rem" }}>
+              同じ生徒さんへのレッスンが積み重なるほど、運営手数料が下がり、
+              先生のお受け取りが増えます（10回で15%、50回で10%）。
+              回数は成立したレッスンのみを数えます。
+            </p>
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>生徒</th>
+                  <th className="num">受講回数</th>
+                  <th className="num">現在の手数料</th>
+                  <th>次の割引まで</th>
+                </tr>
+              </thead>
+              <tbody>
+                {studentProgress.map((s) => (
+                  <tr key={s.userId}>
+                    <td>{s.name}</td>
+                    <td className="num">{s.progress.count}回</td>
+                    <td className="num">{Math.round(s.progress.rate * 100)}%</td>
+                    <td>
+                      {s.progress.remaining != null && s.progress.nextRate != null
+                        ? `あと${s.progress.remaining}回で ${Math.round(
+                            s.progress.nextRate * 100
+                          )}%`
+                        : "最大割引に到達"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
         {loading ? (
           <p style={{ textAlign: "center" }}>読み込み中...</p>
         ) : error ? (
@@ -196,6 +272,15 @@ const TeacherReservations: React.FC = () => {
                     ? `${res.lessonAmount.toLocaleString()}円`
                     : "―"}
                 </p>
+                {res.teacherPayout != null && res.commissionRate != null && (
+                  <p>
+                    <strong>お受け取り：</strong>
+                    {res.teacherPayout.toLocaleString()}円
+                    <span style={{ color: "#8a8270", fontSize: "0.85rem" }}>
+                      （運営手数料 {Math.round(res.commissionRate * 100)}% を差引後）
+                    </span>
+                  </p>
+                )}
                 <p>
                   <strong>決済状態：</strong>
                   {statusLabel(PAYMENT_STATUS_LABELS, res.paymentStatus)}

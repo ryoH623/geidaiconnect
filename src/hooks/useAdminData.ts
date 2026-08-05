@@ -63,6 +63,9 @@ export function useAdminData(): AdminData {
               lessonDate: str(x.lessonDate),
               paymentStatus: str(x.paymentStatus),
               reservationStatus: str(x.reservationStatus),
+              // 逓減制の導入前に作られた予約には無い（null → 従来の固定率で計算）
+              commissionRate:
+                typeof x.commissionRate === "number" ? x.commissionRate : null,
             };
           })
         );
