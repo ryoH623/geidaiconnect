@@ -1557,6 +1557,13 @@ export const createReservationAndCheckout = https.onCall(
       // ずれても1件ぶんで、生徒に不利にはならない。
       const priorLessonCount = await countPaidLessons(userId, teacherId);
       const commissionRate = commissionRateFor(priorLessonCount);
+      const commissionAmount = Math.floor(lessonAmount * commissionRate);
+      const teacherPayout = lessonAmount - commissionAmount;
+      // 手数料の明細は予約と同じ ID で別コレクションに持つ（生徒からは読めない）
+      const payoutRef = admin
+        .firestore()
+        .collection("reservationPayouts")
+        .doc(reservationId);
 
       logger.info("createReservationAndCheckout start", {
         uid: userId,
@@ -1769,12 +1776,6 @@ export const createReservationAndCheckout = https.onCall(
           studioFee: studioId ? studioFee : null,
           studioBookingDocId: studioBookingDocId || null,
           totalAmount,
-          // 運営手数料（逓減制）。予約時点の率を固定して保存する。
-          // teacherPayout = lessonAmount - commissionAmount（スタジオ代は含めない）
-          commissionRate,
-          commissionAmount: Math.floor(lessonAmount * commissionRate),
-          teacherPayout: lessonAmount - Math.floor(lessonAmount * commissionRate),
-          priorLessonCount,
           // 支払い方法と、カード与信の締切キャプチャ予定時刻
           paymentMethod,
           chargeDueAt: chargeDueTimestamp(date),
@@ -1786,6 +1787,22 @@ export const createReservationAndCheckout = https.onCall(
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           paidAt: null,
+        });
+
+        // 手数料・講師取り分は予約本体とは別コレクションに置く。
+        // reservations は生徒本人も読めるため、同じドキュメントに入れると
+        // 画面に出していなくても生徒側から料率が見えてしまう。
+        // このコレクションは講師本人と admin のみ read 可（firestore.rules 参照）。
+        tx.set(payoutRef, {
+          reservationId,
+          teacherId,
+          lessonAmount,
+          commissionRate,
+          commissionAmount,
+          teacherPayout,
+          priorLessonCount,
+          lessonDate: date,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       });
 
@@ -1941,9 +1958,21 @@ export const createReservationAndCheckout = https.onCall(
               }
 
               tx.delete(reservationRef!);
+              // 手数料明細は予約と同じ ID なので、予約を消すときは必ず一緒に消す
+              tx.delete(
+                admin
+                  .firestore()
+                  .collection("reservationPayouts")
+                  .doc(reservationRef!.id)
+              );
             });
           } else {
             await reservationRef.delete();
+            await admin
+              .firestore()
+              .collection("reservationPayouts")
+              .doc(reservationRef.id)
+              .delete();
           }
 
           logger.info("createReservationAndCheckout rollback success", {

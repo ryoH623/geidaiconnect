@@ -52,6 +52,15 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // 予約1件ごとの手数料明細（料率・運営手数料・講師取り分）。
+    // 予約本体は生徒本人も読めるため、生徒に見せない情報はこちらに分離している。
+    // 読めるのは担当講師本人と admin のみ。書き込みは Cloud Functions（Admin SDK）だけ。
+    match /reservationPayouts/{reservationId} {
+      allow read: if (isSignedIn() && request.auth.uid == resource.data.teacherId)
+        || isAdmin();
+      allow create, update, delete: if false;
+    }
+
     match /reviews/{reviewId} {
       allow read: if true;
       // 投稿者は必ず自分自身。以前はログインしていれば userId に他人の ID を

@@ -104,7 +104,26 @@ const TeacherReservations: React.FC = () => {
           collection(db, "reservations"),
           where("teacherId", "==", user.uid)
         );
-        const querySnapshot = await getDocs(q);
+        // 手数料明細は別コレクション（生徒からは読めない）。予約 ID で突き合わせる。
+        const payoutQ = query(
+          collection(db, "reservationPayouts"),
+          where("teacherId", "==", user.uid)
+        );
+        const [querySnapshot, payoutSnapshot] = await Promise.all([
+          getDocs(q),
+          getDocs(payoutQ),
+        ]);
+
+        const payouts = new Map<string, { rate: number; payout: number }>();
+        for (const p of payoutSnapshot.docs) {
+          const v = p.data();
+          if (
+            typeof v.commissionRate === "number" &&
+            typeof v.teacherPayout === "number"
+          ) {
+            payouts.set(p.id, { rate: v.commissionRate, payout: v.teacherPayout });
+          }
+        }
 
         const data: Reservation[] = querySnapshot.docs.map((docSnap) => {
           const d = docSnap.data();
@@ -127,10 +146,8 @@ const TeacherReservations: React.FC = () => {
               typeof d.paymentStatus === "string" ? d.paymentStatus : "",
             reservationStatus:
               typeof d.reservationStatus === "string" ? d.reservationStatus : "",
-            commissionRate:
-              typeof d.commissionRate === "number" ? d.commissionRate : null,
-            teacherPayout:
-              typeof d.teacherPayout === "number" ? d.teacherPayout : null,
+            commissionRate: payouts.get(docSnap.id)?.rate ?? null,
+            teacherPayout: payouts.get(docSnap.id)?.payout ?? null,
             notes: typeof d.notes === "string" ? d.notes : "",
           };
         });
