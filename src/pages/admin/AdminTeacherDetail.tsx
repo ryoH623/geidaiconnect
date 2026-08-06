@@ -18,7 +18,7 @@ import {
   availableYears,
   isPaid,
   yen,
-  COMMISSION_RATE,
+  commissionOfReservation,
 } from "../../lib/adminStats";
 
 const GOLD = "#b89f6b";
@@ -51,13 +51,16 @@ const AdminTeacherDetail: React.FC = () => {
 
   const totals = useMemo(() => {
     let gmv = 0;
+    let commission = 0;
     let count = 0;
     for (const r of teacherReservations) {
       if (!isPaid(r)) continue;
       gmv += r.lessonAmount;
+      // 料率は予約ごとに異なる（逓減制）ため、合計から逆算せず1件ずつ足す
+      commission += commissionOfReservation(r);
       count += 1;
     }
-    return { gmv, commission: Math.floor(gmv * COMMISSION_RATE), count };
+    return { gmv, commission, count };
   }, [teacherReservations]);
 
   const rating = useMemo(() => {

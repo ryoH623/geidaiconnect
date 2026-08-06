@@ -28,6 +28,14 @@ const AdminHome: React.FC = () => {
           </Link>
 
           <Link
+            to="/admin/commission-sim"
+            className="form-button"
+            style={{ textAlign: "center" }}
+          >
+            手数料 逓減制シミュレーション
+          </Link>
+
+          <Link
             to="/admin/students"
             className="form-button"
             style={{ textAlign: "center" }}

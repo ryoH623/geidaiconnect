@@ -42,12 +42,20 @@ export function useAdminData(): AdminData {
       try {
         setLoading(true);
         setError("");
-        const [resSnap, userSnap, reviewSnap] = await Promise.all([
+        const [resSnap, userSnap, reviewSnap, payoutSnap] = await Promise.all([
           getDocs(collection(db, "reservations")),
           getDocs(collection(db, "users")),
           getDocs(collection(db, "reviews")),
+          // 手数料明細は別コレクション（生徒に見せないため）。予約 ID で突き合わせる。
+          getDocs(collection(db, "reservationPayouts")),
         ]);
         if (!alive) return;
+
+        const rateByReservation = new Map<string, number>();
+        for (const d of payoutSnap.docs) {
+          const rate = d.data().commissionRate;
+          if (typeof rate === "number") rateByReservation.set(d.id, rate);
+        }
 
         setReservations(
           resSnap.docs.map((d) => {
@@ -63,6 +71,8 @@ export function useAdminData(): AdminData {
               lessonDate: str(x.lessonDate),
               paymentStatus: str(x.paymentStatus),
               reservationStatus: str(x.reservationStatus),
+              // 逓減制の導入前に作られた予約には無い（null → 従来の固定率で計算）
+              commissionRate: rateByReservation.get(d.id) ?? null,
             };
           })
         );

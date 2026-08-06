@@ -38,6 +38,7 @@ const TeacherReservations = lazy(
 );
 const AdminHome = lazy(() => import("./pages/admin/AdminHome"));
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
+const AdminCommissionSim = lazy(() => import("./pages/admin/AdminCommissionSim"));
 const AdminStudents = lazy(() => import("./pages/admin/AdminStudents"));
 const AdminTeachers = lazy(() => import("./pages/admin/AdminTeachers"));
 const AdminTeacherDetail = lazy(() => import("./pages/admin/AdminTeacherDetail"));
@@ -154,6 +155,14 @@ function App() {
             element={
               <RequireAdmin>
                 <AdminDashboard />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/commission-sim"
+            element={
+              <RequireAdmin>
+                <AdminCommissionSim />
               </RequireAdmin>
             }
           />

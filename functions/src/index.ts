@@ -1309,6 +1309,54 @@ export const getAvailableStudios = https.onCall(
   }
 );
 
+// ───────────────────────────────────────────────────────────
+// 手数料の逓減制（変動手数料）
+//
+// 「同じ生徒 × 同じ講師」の累計成立レッスン数が増えるほど運営手数料を下げ、
+// その分だけ講師の取り分を増やす。長期的な継続の動機付けと、
+// プラットフォーム外での直接取引の抑止を狙う。
+//
+// 料率は予約作成時に reservations.commissionRate へスナップショット保存する。
+// 後から料率表を変えても過去の精算額がぶれず、監査もできるようにするため。
+// ※ フロント側の表示は src/lib/adminStats.ts の COMMISSION_TIERS と対になっている。
+//    片方だけ変えないこと。
+// ───────────────────────────────────────────────────────────
+const COMMISSION_TIERS: { minCount: number; rate: number }[] = [
+  { minCount: 0, rate: 0.18 },
+  { minCount: 10, rate: 0.15 },
+  { minCount: 50, rate: 0.1 },
+];
+
+/** 受講済み priorCount 回のペアに適用する手数料率。 */
+function commissionRateFor(priorCount: number): number {
+  let rate = COMMISSION_TIERS[0].rate;
+  for (const t of COMMISSION_TIERS) {
+    if (priorCount >= t.minCount) rate = t.rate;
+  }
+  return rate;
+}
+
+/**
+ * この生徒×講師ペアで既に成立しているレッスン数を数える。
+ * 返金・与信取消は paymentStatus が refunded / voided に変わるため自然に除外される。
+ *
+ * 等価条件2つ（userId, teacherId）のみで引き、paymentStatus はメモリ上で絞る。
+ * 複合インデックスを不要にするため（ペアあたりの件数は小さい）。
+ */
+async function countPaidLessons(
+  userId: string,
+  teacherId: string
+): Promise<number> {
+  if (!userId || !teacherId) return 0;
+  const snap = await admin
+    .firestore()
+    .collection("reservations")
+    .where("userId", "==", userId)
+    .where("teacherId", "==", teacherId)
+    .get();
+  return snap.docs.filter((d) => d.get("paymentStatus") === "paid").length;
+}
+
 export const createReservationAndCheckout = https.onCall(
   async (
     data: CreateReservationAndCheckoutData,
@@ -1503,6 +1551,20 @@ export const createReservationAndCheckout = https.onCall(
         ? admin.firestore().collection("studioBookings").doc(studioBookingDocId)
         : null;
 
+      // 手数料率は「この予約より前の成立回数」で決まる（非遡及）。
+      // トランザクション外で数えるのは、同時予約が閾値をまたぐ稀なケースより
+      // トランザクションの読み取り制約を避ける方を優先したため。
+      // ずれても1件ぶんで、生徒に不利にはならない。
+      const priorLessonCount = await countPaidLessons(userId, teacherId);
+      const commissionRate = commissionRateFor(priorLessonCount);
+      const commissionAmount = Math.floor(lessonAmount * commissionRate);
+      const teacherPayout = lessonAmount - commissionAmount;
+      // 手数料の明細は予約と同じ ID で別コレクションに持つ（生徒からは読めない）
+      const payoutRef = admin
+        .firestore()
+        .collection("reservationPayouts")
+        .doc(reservationId);
+
       logger.info("createReservationAndCheckout start", {
         uid: userId,
         reservationId,
@@ -1511,6 +1573,8 @@ export const createReservationAndCheckout = https.onCall(
         date,
         time,
         scheduleDocId,
+        priorLessonCount,
+        commissionRate,
       });
 
       await admin.firestore().runTransaction(async (tx) => {
@@ -1724,6 +1788,22 @@ export const createReservationAndCheckout = https.onCall(
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           paidAt: null,
         });
+
+        // 手数料・講師取り分は予約本体とは別コレクションに置く。
+        // reservations は生徒本人も読めるため、同じドキュメントに入れると
+        // 画面に出していなくても生徒側から料率が見えてしまう。
+        // このコレクションは講師本人と admin のみ read 可（firestore.rules 参照）。
+        tx.set(payoutRef, {
+          reservationId,
+          teacherId,
+          lessonAmount,
+          commissionRate,
+          commissionAmount,
+          teacherPayout,
+          priorLessonCount,
+          lessonDate: date,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
       });
 
       const stripe = getStripeClient();
@@ -1878,9 +1958,21 @@ export const createReservationAndCheckout = https.onCall(
               }
 
               tx.delete(reservationRef!);
+              // 手数料明細は予約と同じ ID なので、予約を消すときは必ず一緒に消す
+              tx.delete(
+                admin
+                  .firestore()
+                  .collection("reservationPayouts")
+                  .doc(reservationRef!.id)
+              );
             });
           } else {
             await reservationRef.delete();
+            await admin
+              .firestore()
+              .collection("reservationPayouts")
+              .doc(reservationRef.id)
+              .delete();
           }
 
           logger.info("createReservationAndCheckout rollback success", {
