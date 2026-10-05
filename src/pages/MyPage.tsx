@@ -9,6 +9,7 @@ const MyPage: React.FC = () => {
   const { user, role } = useAuth();
   // 友達紹介は生徒と管理者が対象（functions 側の canOwnReferralCode と揃えること）
   const canOwnCode = role === "student" || role === "admin";
+  const isTeacher = role === "teacher";
 
   return (
     <main className="about-section fade-in-up">
@@ -30,6 +31,26 @@ const MyPage: React.FC = () => {
             gap: "16px",
           }}
         >
+          {isTeacher && (
+            <>
+              <Link
+                to="/teacher/profile"
+                className="form-button"
+                style={{ textAlign: "center" }}
+              >
+                プロフィール・コースの登録
+              </Link>
+
+              <Link
+                to="/schedule-list"
+                className="form-button"
+                style={{ textAlign: "center" }}
+              >
+                スケジュール管理
+              </Link>
+            </>
+          )}
+
           <Link
             to="/history"
             className="form-button"
@@ -66,6 +87,15 @@ const MyPage: React.FC = () => {
         </div>
 
         {canOwnCode && <ReferralCodeCard heading="あなたの紹介コード" />}
+
+        {/* 管理者は退会の対象外（functions 側の deleteAccount と揃える） */}
+        {role !== "admin" && (
+          <p style={{ textAlign: "center", marginTop: "3rem", fontSize: "0.9rem" }}>
+            <Link to="/mypage/withdraw" style={{ color: "#8a8270" }}>
+              退会について
+            </Link>
+          </p>
+        )}
       </div>
     </main>
   );

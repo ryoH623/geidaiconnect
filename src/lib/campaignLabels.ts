@@ -25,6 +25,21 @@ export const REFERRAL_STATUS_LABEL: Record<string, string> = {
   reward_granted: '3回完了（紹介者に付与済み）',
 };
 
+/**
+ * 紹介が無効化された理由。自動判定のものはコード値で入るため日本語にする。
+ * 運営が手動で無効化した場合は入力された理由がそのまま入っている。
+ */
+const BLOCKED_REASON_LABEL: Record<string, string> = {
+  same_email: '紹介者と同じメールアドレス',
+  same_phone: '紹介者と同じ電話番号',
+  rejoined: '退会済みのメールアドレスで再登録',
+};
+
+export function blockedReasonText(reason: string | null): string {
+  if (!reason) return '';
+  return BLOCKED_REASON_LABEL[reason] ?? reason;
+}
+
 export function couponStatusColor(status: CouponStatus): string {
   switch (status) {
     case 'available':

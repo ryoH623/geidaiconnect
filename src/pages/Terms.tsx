@@ -6,7 +6,7 @@ const Terms: React.FC = () => {
   return (
     <main className="about-section fade-in-up">
       <h2 className="terms-title">Geidai Connect 利用規約（ベータ版）</h2>
-      <p style={{ textAlign: "center" }}>最終更新日：2026年7月23日</p>
+      <p style={{ textAlign: "center" }}>最終更新日：2026年10月5日</p>
 
       <h3 className="terms-section-title">第1条（適用）</h3>
       <p>
@@ -135,7 +135,10 @@ const Terms: React.FC = () => {
 
       <h3 className="terms-section-title">第13条（退会・登録削除）</h3>
       <p>
-        ユーザーはいつでも退会できます。
+        ユーザーはいつでも、マイページから退会できます。ただし、今後のレッスンの予約や、
+        お支払いが確定していない予約がある場合は、それらの手続きが終わるまで退会できません。
+        退会後も、投稿したレビューは投稿者が分からない形で掲載を続けます。
+        退会により、未使用のクーポンその他の特典は失効し、再登録しても復活しません。
         運営者は、ユーザーが本規約に違反した場合、事前の通知なく登録を削除することがあります。
       </p>
 

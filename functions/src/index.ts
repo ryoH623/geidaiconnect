@@ -1,7 +1,6 @@
 import * as admin from "firebase-admin";
 import { auth as v1auth, https, logger, pubsub } from "firebase-functions/v1";
 import { defineString } from "firebase-functions/params";
-import nodemailer from "nodemailer";
 import type { Response } from "express";
 import { google } from "googleapis";
 
@@ -38,14 +37,39 @@ export {
 // 検索ログ（0件検索の記録）。実装は searchLogs.ts にある。
 export { logSearch, purgeOldSearchLogs } from "./searchLogs";
 
+// 講師の招待（role: teacher の付与）。実装は teacherInvites.ts にある。
+export {
+  adminCreateTeacherInvite,
+  checkTeacherInvite,
+  acceptTeacherInvite,
+} from "./teacherInvites";
+
+// 講師本人によるプロフィール・コースの編集。実装は teacherProfileEdit.ts にある。
+export { saveMyTeacherProfile } from "./teacherProfileEdit";
+
+// 退会（本人・運営による強制退会）。実装は accountDeletion.ts にある。
+export {
+  checkMyAccountDeletion,
+  deleteMyAccount,
+  adminDeleteUser,
+} from "./accountDeletion";
+
 // ========================================
 // Environment variables
 // ========================================
-const SMTP_HOST = defineString("SMTP_HOST");
-const SMTP_PORT = defineString("SMTP_PORT");
-const SMTP_USER = defineString("SMTP_USER");
-const SMTP_PASS = defineString("SMTP_PASS");
 const APP_URL = defineString("APP_URL");
+
+// メール送信の共通基盤は mailer.ts にある（teacherInvites.ts からも使うため）
+import {
+  SMTP_HOST,
+  SMTP_PORT,
+  SMTP_USER,
+  SMTP_PASS,
+  makeTransport,
+  escapeHtml,
+  sendMailSafe,
+  buildInfoMailHtml,
+} from "./mailer";
 
 // お問い合わせフォームの通知先（運営宛）
 const CONTACT_TO = defineString("CONTACT_TO", {
@@ -70,28 +94,6 @@ const STUDIO_ADMIN_SECRET = defineString("STUDIO_ADMIN_SECRET", { default: "" })
 // ========================================
 // SMTP / Email
 // ========================================
-function makeTransport() {
-  const port = Number(SMTP_PORT.value());
-
-  logger.info("makeTransport config", {
-    host: SMTP_HOST.value(),
-    port,
-    secure: port === 465,
-    user: SMTP_USER.value(),
-    passExists: !!SMTP_PASS.value(),
-    passLength: SMTP_PASS.value()?.length ?? 0,
-  });
-
-  return nodemailer.createTransport({
-    host: SMTP_HOST.value(),
-    port,
-    secure: port === 465,
-    auth: {
-      user: SMTP_USER.value(),
-      pass: SMTP_PASS.value(),
-    },
-  });
-}
 
 async function verifyTransport() {
   const transporter = makeTransport();
@@ -164,14 +166,6 @@ function buildVerifyEmailHtml(displayName: string, link: string) {
 // 予約関連メールの共通基盤
 // ========================================
 
-/** HTML に埋め込むユーザー入力値のエスケープ */
-function escapeHtml(value: unknown): string {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
 
 /**
  * users/{uid} → 無ければ Auth からメールアドレスと表示名を解決する。
@@ -215,36 +209,6 @@ async function getUserContact(
   return { email, displayName };
 }
 
-/**
- * メール送信（失敗しても throw しない）。
- * Webhook・スケジュール実行など、送信失敗で本処理を止めたくない箇所から使う。
- */
-async function sendMailSafe(mail: {
-  to: string;
-  subject: string;
-  html: string;
-  replyTo?: string;
-}): Promise<boolean> {
-  try {
-    const transporter = makeTransport();
-    await transporter.sendMail({
-      from: `Geidai Connect <${SMTP_USER.value()}>`,
-      to: mail.to,
-      replyTo: mail.replyTo ?? "support@geidaiconnect.com",
-      subject: mail.subject,
-      html: mail.html,
-    });
-    logger.info("sendMailSafe success", { to: mail.to, subject: mail.subject });
-    return true;
-  } catch (error) {
-    logger.error("sendMailSafe failed", {
-      to: mail.to,
-      subject: mail.subject,
-      error,
-    });
-    return false;
-  }
-}
 
 /** サーバーのタイムゾーンに依存せず JST の "YYYY-MM-DD" を返す */
 function todayJst(offsetDays = 0): string {
@@ -254,53 +218,6 @@ function todayJst(offsetDays = 0): string {
   return jst.toISOString().slice(0, 10);
 }
 
-/**
- * 案内メールの共通レイアウト。
- * intro / outro は HTML として挿入するため、ユーザー入力を含める場合は
- * 呼び出し側で escapeHtml すること。rows の値は内部でエスケープする。
- */
-function buildInfoMailHtml(params: {
-  greetingName: string;
-  intro: string[];
-  rows: Array<[string, string]>;
-  outro?: string[];
-}): string {
-  const introHtml = params.intro.map((p) => `<p>${p}</p>`).join("\n");
-  const rowsHtml = params.rows
-    .filter(([, value]) => value !== "")
-    .map(
-      ([key, value]) =>
-        `<tr>` +
-        `<td style="padding: 4px 16px 4px 0; color: #666; white-space: nowrap; vertical-align: top;">${escapeHtml(
-          key
-        )}</td>` +
-        `<td style="padding: 4px 0;">${escapeHtml(value)}</td>` +
-        `</tr>`
-    )
-    .join("\n");
-  const outroHtml = (params.outro ?? []).map((p) => `<p>${p}</p>`).join("\n");
-
-  return `
-    <div style="font-family: Arial, 'Hiragino Kaku Gothic ProN', 'Yu Gothic', sans-serif; line-height: 1.8; color: #333;">
-      <p>${escapeHtml(params.greetingName)} 様</p>
-
-      ${introHtml}
-
-      <table style="margin: 16px 0; border-collapse: collapse;">
-        ${rowsHtml}
-      </table>
-
-      ${outroHtml}
-
-      <hr style="margin: 32px 0; border: none; border-top: 1px solid #e5e5e5;" />
-
-      <p style="font-size: 12px; color: #666;">
-        Geidai Connect<br />
-        お問い合わせ: support@geidaiconnect.com
-      </p>
-    </div>
-  `;
-}
 
 /** 予約内容の共通行（生徒向け・講師向けメールで共用） */
 function reservationRows(r: any): Array<[string, string]> {
@@ -3809,8 +3726,6 @@ export const submitRequest = https.onCall(
 // ========================================
 // Callable: 講師応募フォーム送信（未ログインでも可）
 // ========================================
-const LESSON_TYPE_VALUES = ["自宅", "スタジオ", "出張", "オンライン"] as const;
-
 export const submitTeacherApplication = https.onCall(
   async (
     data: {
@@ -3818,6 +3733,9 @@ export const submitTeacherApplication = https.onCall(
       furigana?: string;
       email?: string;
       phone?: string;
+      postalCode?: string;
+      gender?: string;
+      birthday?: { year?: string; month?: string; day?: string };
       address?: {
         prefecture?: string;
         city?: string;
@@ -3826,9 +3744,6 @@ export const submitTeacherApplication = https.onCall(
       };
       subject?: string;
       graduationYear?: number;
-      homeLessonAvailable?: boolean;
-      lessonTypes?: string[];
-      travelRange?: string;
       bio?: string;
     },
     context
@@ -3839,6 +3754,39 @@ export const submitTeacherApplication = https.onCall(
     const furigana = str(data?.furigana);
     const email = str(data?.email);
     const phone = str(data?.phone);
+    const postalCode = str(data?.postalCode).replace(/[^0-9]/g, "");
+    if (!/^\d{7}$/.test(postalCode)) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "郵便番号は7桁の数字で入力してください。"
+      );
+    }
+
+    const gender = str(data?.gender);
+    if (!["male", "female", "other"].includes(gender)) {
+      throw new https.HttpsError("invalid-argument", "性別を選択してください。");
+    }
+
+    const birthday = {
+      year: str(data?.birthday?.year),
+      month: str(data?.birthday?.month),
+      day: str(data?.birthday?.day),
+    };
+    const birthDate = new Date(
+      Number(birthday.year),
+      Number(birthday.month) - 1,
+      Number(birthday.day)
+    );
+    if (
+      !birthday.year ||
+      !birthday.month ||
+      !birthday.day ||
+      Number.isNaN(birthDate.getTime()) ||
+      birthDate > new Date()
+    ) {
+      throw new https.HttpsError("invalid-argument", "生年月日が正しくありません。");
+    }
+
     const address = {
       prefecture: str(data?.address?.prefecture),
       city: str(data?.address?.city),
@@ -3848,7 +3796,6 @@ export const submitTeacherApplication = https.onCall(
     const subject = str(data?.subject);
     const bio = str(data?.bio);
     const graduationYear = data?.graduationYear;
-    const homeLessonAvailable = data?.homeLessonAvailable;
 
     if (
       !name ||
@@ -3912,41 +3859,6 @@ export const submitTeacherApplication = https.onCall(
       );
     }
 
-    if (typeof homeLessonAvailable !== "boolean") {
-      throw new https.HttpsError(
-        "invalid-argument",
-        "自宅レッスンの可否を選択してください。"
-      );
-    }
-
-    const lessonTypes = Array.isArray(data?.lessonTypes)
-      ? data.lessonTypes
-      : [];
-    if (
-      lessonTypes.length === 0 ||
-      lessonTypes.some(
-        (t) => !LESSON_TYPE_VALUES.includes(t as (typeof LESSON_TYPE_VALUES)[number])
-      )
-    ) {
-      throw new https.HttpsError(
-        "invalid-argument",
-        "希望レッスン形態を1つ以上選択してください。"
-      );
-    }
-
-    const travelRange = str(data?.travelRange);
-    if (travelRange.length > 100) {
-      throw new https.HttpsError(
-        "invalid-argument",
-        "出張可能な範囲の内容が正しくありません。"
-      );
-    }
-    if (lessonTypes.includes("出張") && !travelRange) {
-      throw new https.HttpsError(
-        "invalid-argument",
-        "出張レッスンを希望する場合は出張可能な範囲を選択してください。"
-      );
-    }
 
     const docRef = await admin
       .firestore()
@@ -3956,12 +3868,12 @@ export const submitTeacherApplication = https.onCall(
         furigana,
         email,
         phone,
+        postalCode,
+        gender,
+        birthday,
         address,
         subject,
         graduationYear,
-        homeLessonAvailable,
-        lessonTypes,
-        travelRange,
         bio,
         userId: context.auth?.uid ?? null,
         status: "new",
@@ -3986,20 +3898,26 @@ export const submitTeacherApplication = https.onCall(
           ["ふりがな", furigana],
           ["メールアドレス", email],
           ["電話番号", phone],
+          ["生年月日", `${birthday.year}/${birthday.month}/${birthday.day}`],
           [
             "住所",
             `${address.prefecture}${address.city}${address.town} ${address.line}`,
           ],
           ["専攻", subject],
           ["卒業年", `${graduationYear}年`],
-          ["自宅レッスン", homeLessonAvailable ? "可" : "不可"],
-          ["希望レッスン形態", lessonTypes.join("、")],
-          ["出張可能な範囲", travelRange || "なし"],
           ["ユーザーID", context.auth?.uid ?? "未ログイン"],
         ],
         outro: [
           "―― 経歴・自己PR ――",
           escapeHtml(bio).replace(/\n/g, "<br />"),
+          // 応募を見てすぐ動けるよう、管理画面への導線を置く。
+          // この画面から「この応募から招待」で招待URLを発行できる。
+          `<a href="${APP_URL.value()}/admin/teacher-profiles"` +
+            ` style="display: inline-block; margin-top: 16px; padding: 10px 20px;` +
+            ` background: #b9a06b; color: #fff; text-decoration: none;` +
+            ` border-radius: 6px;">管理画面で確認する</a>`,
+          `<span style="font-size: 12px; color: #666;">` +
+            `※この画面から、応募内容を引き継いだ招待URLを発行できます。</span>`,
         ],
       }),
     });

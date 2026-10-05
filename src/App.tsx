@@ -28,11 +28,15 @@ import MyPage from "./pages/MyPage";
 import Profile from "./pages/Profile";
 import StudentReservations from "./pages/student/StudentReservations";
 import ReferralPage from "./pages/student/ReferralPage";
+import Withdraw from "./pages/Withdraw";
 import ProtectedRoute from "./ProtectedRoute";
 
 // 予約フォームと講師・管理画面はバンドルが大きく、初期表示では不要なため遅延読み込みする
 const ReservationForm = lazy(() => import("./pages/ReservationForm"));
 const ScheduleForm = lazy(() => import("./pages/teachers/ScheduleForm"));
+const TeacherProfileForm = lazy(
+  () => import("./pages/teachers/TeacherProfileForm")
+);
 const ScheduleList = lazy(() => import("./pages/teachers/ScheduleList"));
 const TeacherReservations = lazy(
   () => import("./pages/teachers/TeacherReservations")
@@ -54,6 +58,9 @@ const AdminUserCampaigns = lazy(
 const AdminContacts = lazy(() => import("./pages/admin/AdminContacts"));
 const AdminRequests = lazy(() => import("./pages/admin/AdminRequests"));
 const AdminSearchLogs = lazy(() => import("./pages/admin/AdminSearchLogs"));
+const AdminTeacherProfiles = lazy(
+  () => import("./pages/admin/AdminTeacherProfiles")
+);
 const TestCheckoutPage = lazy(() => import("./pages/TestCheckoutPage"));
 
 function App() {
@@ -131,7 +138,19 @@ function App() {
             }
           />
 
+          {/* 退会。完了後はログアウト状態で完了画面を出すため ProtectedRoute で包まない
+              （未ログイン時のログイン画面への誘導はページ側で行う） */}
+          <Route path="/mypage/withdraw" element={<Withdraw />} />
+
           {/* 🔐 講師専用ルート（ガード付き） */}
+          <Route
+            path="/teacher/profile"
+            element={
+              <RequireTeacher>
+                <TeacherProfileForm />
+              </RequireTeacher>
+            }
+          />
           <Route
             path="/schedule-form"
             element={
@@ -163,6 +182,14 @@ function App() {
             element={
               <RequireAdmin>
                 <AdminHome />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/teacher-profiles"
+            element={
+              <RequireAdmin>
+                <AdminTeacherProfiles />
               </RequireAdmin>
             }
           />

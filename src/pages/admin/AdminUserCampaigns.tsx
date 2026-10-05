@@ -11,6 +11,7 @@ import {
   COUPON_STATUS_LABEL,
   COUPON_TYPE_LABEL,
   REFERRAL_STATUS_LABEL,
+  blockedReasonText,
   couponReasonText,
   couponStatusColor,
   formatTimestamp,
@@ -173,7 +174,7 @@ const AdminUserCampaigns: React.FC = () => {
                         <td>{formatTimestamp(r.createdAt)}</td>
                         <td style={r.blocked ? { color: '#c62828' } : undefined}>
                           {r.blocked
-                            ? `無効化${r.blockedReason ? `（${r.blockedReason}）` : ''}`
+                            ? `無効化${r.blockedReason ? `（${blockedReasonText(r.blockedReason)}）` : ''}`
                             : REFERRAL_STATUS_LABEL[r.status] ?? r.status}
                         </td>
                         <td className="num">{r.completedLessonCount}</td>
@@ -202,7 +203,7 @@ const AdminUserCampaigns: React.FC = () => {
                     </Link>{' '}
                     ／ コード {r.code} ／ 完了レッスン {r.completedLessonCount}回 ／{' '}
                     {r.blocked
-                      ? `無効化${r.blockedReason ? `（${r.blockedReason}）` : ''}`
+                      ? `無効化${r.blockedReason ? `（${blockedReasonText(r.blockedReason)}）` : ''}`
                       : REFERRAL_STATUS_LABEL[r.status] ?? r.status}
                   </li>
                 ))}

@@ -2,10 +2,14 @@
 // 講師詳細ページ（/teachers/:id）。静的データ（src/data/teachers.ts）から表示する。
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { teachers, getCourses } from "../data/teachers";
-import type { LessonCourse } from "../data/teachers";
+import { useTeachers } from "../hooks/useTeachers";
+import { getCourses } from "../lib/teacherProfiles";
+import type { LessonCourse } from "../lib/teacherProfiles";
 import ReviewList from "../components/ReviewList";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+// アイコンは実体を渡す。文字列名での指定は library.add による登録が前提で、
+// このプロジェクトでは登録していないため描画されない。
+import { faLocationDot } from "@fortawesome/free-solid-svg-icons";
 import { tagIconMap } from "../utils/tagIconMap";
 import { buildReserveUrl } from "../utils/reserveUrl";
 import { useAuth } from "../contexts/AuthContext";
@@ -18,6 +22,8 @@ const TeacherDetail: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
 
+  // 講師データは Firestore（公開中のみ）から読む
+  const { teachers, loading: teachersLoading } = useTeachers();
   const teacher = teachers.find((t) => t.id === id) || null;
 
   // 表示・予約に使うコース一覧。オンライン対応の講師には
@@ -28,20 +34,27 @@ const TeacherDetail: React.FC = () => {
   // 選択中のコースをタブ内で保持する（コース名で保存し、閉じれば消える）。
   const courseStorageKey = teacher ? `teacherDetail:course:${teacher.id}` : "";
 
-  const [selectedCourse, setSelectedCourse] = useState<LessonCourse | null>(() => {
-    if (!teacher) return null;
+  const [selectedCourse, setSelectedCourse] = useState<LessonCourse | null>(null);
+
+  // 講師データは非同期で届くため、届いてから保存済みの選択を復元する。
+  // useState の初期化時点ではコース一覧がまだ空になる。
+  const [restored, setRestored] = useState(false);
+  useEffect(() => {
+    if (restored || !courseStorageKey || courses.length === 0) return;
+    setRestored(true);
 
     try {
       const savedTitle = sessionStorage.getItem(courseStorageKey);
-      if (!savedTitle) return null;
-      return courses.find((c) => c.title === savedTitle) ?? null;
+      if (!savedTitle) return;
+      const found = courses.find((c) => c.title === savedTitle);
+      if (found) setSelectedCourse(found);
     } catch {
-      return null;
+      // sessionStorage が使えない環境では復元しないだけでよい
     }
-  });
+  }, [restored, courseStorageKey, courses]);
 
   useEffect(() => {
-    if (!courseStorageKey) return;
+    if (!courseStorageKey || !restored) return;
 
     try {
       if (selectedCourse) sessionStorage.setItem(courseStorageKey, selectedCourse.title);
@@ -49,7 +62,7 @@ const TeacherDetail: React.FC = () => {
     } catch (error) {
       console.warn("コース選択の保存に失敗しました:", error);
     }
-  }, [courseStorageKey, selectedCourse]);
+  }, [courseStorageKey, selectedCourse, restored]);
 
   // 体験レッスンは生徒1人につき1回まで。この講師で既に体験を受講済みかどうかを判定する。
   // （確定済み＝confirmed の予約で、コース名が体験コースのものがあれば「受講済み」）
@@ -98,6 +111,16 @@ const TeacherDetail: React.FC = () => {
   useEffect(() => {
     if (trialUsed && selectedCourse?.isTrial) setSelectedCourse(null);
   }, [trialUsed, selectedCourse]);
+
+  if (teachersLoading) {
+    return (
+      <main className="about-section fade-in-up">
+        <p style={{ textAlign: "center", margin: "2rem 0" }}>
+          講師情報を読み込んでいます…
+        </p>
+      </main>
+    );
+  }
 
   if (!teacher) {
     return (
@@ -211,49 +234,62 @@ const TeacherDetail: React.FC = () => {
         {courses.length > 0 && (
           <div className="course-table">
             <h4>レッスンコース</h4>
-            <form>
-              <table>
-                <thead>
-                  <tr>
-                    <th>選択</th>
-                    <th>コース名</th>
-                    <th>料金</th>
-                    <th>備考</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {courses
-                    .filter((course) => !(course.isTrial && trialUsed))
-                    .map((course, i) => (
-                    <tr key={i}>
-                      <td>
-                        <input
-                          type="radio"
-                          name="course"
-                          value={course.title}
-                          checked={selectedCourse?.title === course.title}
-                          onChange={() => setSelectedCourse(course)}
-                        />
-                      </td>
-                      <td>
-                        {course.title}
-                        {course.type === "自宅" && course.locationDisplay && (
-                          <div style={{ fontSize: "0.8rem", color: "#555" }}>
-                            <FontAwesomeIcon
-                              icon="location-dot"
-                              style={{ marginRight: "0.3rem" }}
-                            />
-                            {course.locationDisplay}
-                          </div>
+            {/* 表ではなくカードで並べる。スマホでは表の列幅が足りず、
+                コース名が語の途中で折り返して読みづらかった。 */}
+            <form className="course-list">
+              {courses
+                .filter((course) => !(course.isTrial && trialUsed))
+                .map((course, i) => {
+                  const selected = selectedCourse?.title === course.title;
+                  return (
+                    <label
+                      key={i}
+                      className={`course-card${selected ? " is-selected" : ""}`}
+                    >
+                      <input
+                        type="radio"
+                        name="course"
+                        value={course.title}
+                        checked={selected}
+                        onChange={() => setSelectedCourse(course)}
+                      />
+
+                      <div className="course-card-head">
+                        <span className="course-card-type">{course.type}</span>
+                        {course.isTrial && (
+                          <span className="course-card-type course-card-trial">
+                            体験
+                          </span>
                         )}
-                      </td>
-                      <td>{course.price}</td>
-                      <td>{course.note || "-"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </div>
+
+                      <p className="course-card-title">{course.title}</p>
+
+                      <div className="course-card-price">
+                        {course.price.toLocaleString()}
+                        <span className="unit">円</span>
+                      </div>
+
+                      {course.locationDisplay && (
+                        <p className="course-card-meta">
+                          <FontAwesomeIcon icon={faLocationDot} />
+                          <span>{course.locationDisplay}</span>
+                        </p>
+                      )}
+
+                      {course.note && (
+                        <p className="course-card-note">{course.note}</p>
+                      )}
+                    </label>
+                  );
+                })}
             </form>
+            {/* 出張コースがある場合のみ、どこまで来てもらえるかを示す */}
+            {teacher.travelRange && courses.some((c) => c.type === "出張") && (
+              <p style={{ fontSize: "0.85rem", color: "#8a8270", marginTop: "0.5rem" }}>
+                ※出張レッスンの対応範囲：{teacher.travelRange}
+              </p>
+            )}
             {trialUsed && courses.some((c) => c.isTrial) && (
               <p style={{ fontSize: "0.85rem", color: "#8a8270", marginTop: "0.5rem" }}>
                 ※体験レッスンは1回のみです。受講済みのため一覧に表示していません。
@@ -263,7 +299,7 @@ const TeacherDetail: React.FC = () => {
         )}
 
         <div className="reserve-cta-block">
-          <button
+          <button type="button"
             onClick={handleReserveClick}
             className="reserve-button"
             disabled={!canReserve || !selectedCourse}
@@ -282,7 +318,7 @@ const TeacherDetail: React.FC = () => {
         </div>
 
         <div className="review-button-wrapper">
-          <button
+          <button type="button"
             className="review-link-button"
             onClick={() =>
               navigate(

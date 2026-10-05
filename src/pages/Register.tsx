@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
@@ -13,6 +13,19 @@ const GUARDIAN_RELATIONSHIPS = ["父", "母", "祖父", "祖母", "その他の�
 
 const Register: React.FC = () => {
   const navigate = useNavigate();
+
+  // 講師の招待URL（/register?invite=...）から来た場合。
+  // role: teacher の付与は Functions 側で行う。ここでは表示の出し分けと、
+  // 登録直後に acceptTeacherInvite を呼ぶかどうかの判断にだけ使う。
+  const [searchParams] = useSearchParams();
+  const inviteToken = (searchParams.get("invite") || "").trim();
+  const [inviteChecking, setInviteChecking] = useState(!!inviteToken);
+  const [inviteValid, setInviteValid] = useState(false);
+  const [inviteName, setInviteName] = useState("");
+  const [inviteMessage, setInviteMessage] = useState("");
+
+  /** 講師として登録する画面か。生徒向けの項目を出し分けるのに使う */
+  const isTeacherSignup = !!inviteToken && inviteValid;
 
   // 基本
   const [email, setEmail] = useState("");
@@ -50,6 +63,70 @@ const Register: React.FC = () => {
   // 状態
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 招待URLの有効性を先に確かめる。無効なまま登録させると、
+  // 生徒として登録された後に「講師になれない」と分かることになる。
+  useEffect(() => {
+    if (!inviteToken) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const check = httpsCallable<
+          { token: string },
+          {
+            ok: boolean;
+            valid: boolean;
+            name: string;
+            message: string;
+            prefill: Record<string, string> | null;
+          }
+        >(functions, "checkTeacherInvite");
+        const res = await check({ token: inviteToken });
+        if (cancelled) return;
+        setInviteValid(res.data.valid);
+        setInviteName(res.data.name || "");
+        setInviteMessage(res.data.message || "");
+
+        // 応募フォームに書いた内容を引き継ぎ、同じことを二度入力させない。
+        // 空欄のときだけ埋める（入力途中の内容を上書きしないため）。
+        const pre = res.data.prefill;
+        if (res.data.valid && pre) {
+          const p = pre as Record<string, string>;
+          // 応募は氏名を1つの文字列で受けているため、空白で姓と名に分ける
+          const [pLast, ...pRest] = String(p.name || "").split(/[\s　]+/);
+          const [kLast, ...kRest] = String(p.furigana || "").split(/[\s　]+/);
+
+          setEmail((v) => v || String(p.email || ""));
+          setLastName((v) => v || pLast || "");
+          setFirstName((v) => v || pRest.join("") || "");
+          setLastNameKana((v) => v || kLast || "");
+          setFirstNameKana((v) => v || kRest.join("") || "");
+          setPhone((v) => v || String(p.phone || ""));
+          setPostalCode((v) => v || String(p.postalCode || ""));
+          setGender((v) => v || ((p.gender || "") as Gender));
+          setBirthY((v) => v || String(p.birthYear || ""));
+          setBirthM((v) => v || String(p.birthMonth || ""));
+          setBirthD((v) => v || String(p.birthDay || ""));
+          setPrefecture((v) => v || String(p.prefecture || ""));
+          setAddress1((v) => v || [p.city, p.town].filter(Boolean).join(""));
+          setAddress2((v) => v || String(p.line || ""));
+        }
+      } catch (err) {
+        console.error("[register] 招待の確認に失敗:", err);
+        if (!cancelled) {
+          setInviteValid(false);
+          setInviteMessage("招待URLの確認に失敗しました。時間をおいてお試しください。");
+        }
+      } finally {
+        if (!cancelled) setInviteChecking(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [inviteToken]);
 
   // 郵便番号検索のローディング
   const [isSearchingZip, setIsSearchingZip] = useState(false);
@@ -119,7 +196,7 @@ const Register: React.FC = () => {
 
     // 18歳未満は法定代理人（保護者）の情報を必須にする。
     // 自己申告のチェックだけでなく、誰の同意を得たのかを記録として残すため。
-    if (minor) {
+    if (minor && !isTeacherSignup) {
       if (!guardianName.trim() || !guardianNameKana.trim() || !guardianRelationship) {
         setError("18歳未満の方は、保護者のお名前・フリガナ・続柄をご入力ください。");
         return;
@@ -185,7 +262,7 @@ const Register: React.FC = () => {
             : null,
           // 未成年の場合のみ、誰の同意を得たのかを記録として残す。
           // 年齢は誕生日で変わるため保存せず、birthday から都度算出する。
-          guardian: minor
+          guardian: minor && !isTeacherSignup
             ? {
                 name: guardianName.trim(),
                 nameKana: guardianNameKana.trim(),
@@ -203,7 +280,7 @@ const Register: React.FC = () => {
 
       // 4) 友達紹介コード（任意）。コードが無効でも登録自体は成立させ、
       //    案内だけ出す（ここで登録を失敗させると再登録できなくなるため）。
-      if (referralCode.trim()) {
+      if (referralCode.trim() && !isTeacherSignup) {
         try {
           const applyReferralCode = httpsCallable<
             { code: string },
@@ -220,13 +297,36 @@ const Register: React.FC = () => {
         }
       }
 
-      // 5) 検証メールは Functions の onCreate で自動送信されるため、
+      // 5) 講師の招待から来た場合はここで受理する。
+      //    role を teacher に変え、講師プロフィールの下書きを作って authUid を紐付ける。
+      //    ここが失敗すると生徒のまま残ってしまうので、明確にエラーを出す
+      //    （アカウント自体は作成済みなので、運営が招待を出し直せば復帰できる）。
+      if (inviteToken && inviteValid) {
+        try {
+          const accept = httpsCallable<{ token: string }, { ok: boolean; teacherId: string }>(
+            functions,
+            "acceptTeacherInvite"
+          );
+          await accept({ token: inviteToken });
+        } catch (inviteErr: any) {
+          console.error("[register] 招待の受理に失敗:", inviteErr);
+          setError(
+            "会員登録は完了しましたが、講師としての設定に失敗しました。運営にお問い合わせください。"
+          );
+          setSubmitting(false);
+          return;
+        }
+      }
+
+      // 6) 検証メールは Functions の onCreate で自動送信されるため、
       //    フロントから sendVerifyEmail は呼ばない
 
       setError(null);
 
       // メール確認案内ページへ遷移（再送用にメールアドレスを渡す）
-      navigate("/verify-email", { state: { email } });
+      // 講師は登録後にやることが違う（プロフィールとコースの登録）。
+      // 案内ページで出し分けるため、講師登録かどうかを渡す。
+      navigate("/verify-email", { state: { email, isTeacher: isTeacherSignup } });
     } catch (err: any) {
       console.error("[register] failed:", err?.code, err?.message, err);
       const code = err?.code || "";
@@ -250,7 +350,39 @@ const Register: React.FC = () => {
   return (
     <div className="register-container register-page">
       <div className="register-box">
-        <h2>新規会員登録</h2>
+        <h2>{inviteToken && inviteValid ? "講師の新規会員登録" : "新規会員登録"}</h2>
+
+        {/* 招待URLから来た場合の案内。無効なら生徒登録になることを明示する */}
+        {inviteToken && (
+          <div
+            style={{
+              border: "1px solid #ddd",
+              borderRadius: 8,
+              padding: "12px 16px",
+              margin: "1rem 0",
+              background: inviteValid ? "#f3f7f1" : "#fff6f6",
+              lineHeight: 1.8,
+            }}
+          >
+            {inviteChecking ? (
+              <p style={{ margin: 0 }}>招待URLを確認しています…</p>
+            ) : inviteValid ? (
+              <p style={{ margin: 0 }}>
+                {inviteName && <strong>{inviteName} 様</strong>}
+                {inviteName && <br />}
+                講師としてご登録いただけます。登録後、マイページからレッスンコースを
+                作成してください。内容を運営で確認のうえ公開します。
+              </p>
+            ) : (
+              <p style={{ margin: 0, color: "#c62828" }}>
+                {inviteMessage || "この招待URLは利用できません。"}
+                <br />
+                このまま登録すると<strong>生徒アカウント</strong>になります。
+              </p>
+            )}
+          </div>
+        )}
+
         <p className="required-note"><span className="req">*</span>は入力必須項目です。</p>
 
         <form onSubmit={handleSubmit} className="register-form form-grid">
@@ -347,8 +479,9 @@ const Register: React.FC = () => {
             </select>
           </div>
 
-          {/* 18歳未満のときだけ表示。法定代理人の同意を記録として残すため */}
-          {minor && (
+          {/* 18歳未満のときだけ表示。法定代理人の同意を記録として残すため。
+              講師は成人が前提なので講師登録では出さない */}
+          {minor && !isTeacherSignup && (
             <>
               {/* .form-grid は「ラベル｜入力欄」の2カラムグリッドなので、
                   見出しだけ row-2 で全幅にし、各項目は直接の子要素として並べる */}
@@ -433,9 +566,11 @@ const Register: React.FC = () => {
             required
           />
 
-          {/* 友達紹介コード（任意）。
+          {/* 友達紹介コード（任意）。生徒向けの制度なので講師登録では出さない。
               登録後は変更できず、初回レッスンのご予約後は登録できないため、
               その旨をここで明示しておく。 */}
+          {!isTeacherSignup && (
+            <>
           <label>友達紹介コード（任意）</label>
           <input
             type="text"
@@ -454,6 +589,8 @@ const Register: React.FC = () => {
               {referralNotice}
             </p>
           )}
+            </>
+          )}
 
           <div className="row-2">
             <label className="checkbox-label">
@@ -467,9 +604,11 @@ const Register: React.FC = () => {
                   利用規約
                 </a>
                 に同意して申込みます。
-                {minor
-                  ? "上記の保護者（法定代理人）の同意を得ていることを確認します。"
-                  : "未成年者については法定代理人の同意を得ていることを確認します。"}
+                {/* 講師は成人が前提なので、未成年に関する文言は出さない */}
+                {!isTeacherSignup &&
+                  (minor
+                    ? "上記の保護者（法定代理人）の同意を得ていることを確認します。"
+                    : "未成年者については法定代理人の同意を得ていることを確認します。")}
               </span>
             </label>
           </div>

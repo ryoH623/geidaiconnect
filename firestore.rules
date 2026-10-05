@@ -30,7 +30,10 @@ service cloud.firestore {
       // admin 付与は Firebase コンソール / Admin SDK（ルールをバイパス）でのみ行う。
       allow update: if isSignedIn() && request.auth.uid == uid
         && request.resource.data.role == resource.data.role;
-      allow delete: if isSignedIn() && request.auth.uid == uid;
+      // 削除はクライアントから禁止。退会は deleteMyAccount（Cloud Functions）が行い、
+      // 予約やクーポンの後始末と合わせて users を「退会済み」に置き換える。
+      // ここで消せると、後始末をせずに users だけが消えた状態を作れてしまう。
+      allow delete: if false;
     }
 
     match /reservations/{reservationId} {
@@ -107,7 +110,10 @@ service cloud.firestore {
     // 講師応募。作成は Cloud Functions（Admin SDK）経由のみ
     match /teacherApplications/{applicationId} {
       allow read, update: if isAdmin();
-      allow create, delete: if false;
+      // 作成は Cloud Functions（submitTeacherApplication）経由のみ。
+      // 削除は運営に許す。検証用の応募や重複を管理画面から片付けられるようにするため。
+      allow create: if false;
+      allow delete: if isAdmin();
     }
 
     // 演奏・展示などの依頼。作成は Cloud Functions（Admin SDK）経由のみ
@@ -166,6 +172,44 @@ service cloud.firestore {
     // 紹介コード → uid の逆引き。総当たりで他人を特定されないよう read は admin のみ。
     // 照合は Cloud Functions（checkReferralCode / applyReferralCode）が行う。
     match /referralCodes/{code} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    // 講師プロフィールとコース。
+    //
+    // 公開中（published == true）のものは未ログインの訪問者にも見せる。
+    // 未公開（下書き・申請中）は運営と本人だけが読める。書き込みは今は運営のみで、
+    // 講師本人による編集は別途フォームを用意してから開放する。
+    match /teacherProfiles/{teacherId} {
+      allow read: if resource.data.published == true
+        || isAdmin()
+        || (isSignedIn() && resource.data.authUid == request.auth.uid);
+      // 書き込みは運営と、Cloud Functions（saveMyTeacherProfile）経由の本人のみ。
+      // 講師に直接の書き込みを許すと published を自分で true にできてしまい、
+      // 運営の確認を通さずに公開できてしまう。
+      allow create, update, delete: if isAdmin();
+    }
+
+    // 講師の招待トークン。
+    //
+    // read を許すと、トークンを引ければ誰でも講師になれてしまう。
+    // 有効性の確認は checkTeacherInvite（Cloud Functions）が行う。
+    match /teacherInvites/{token} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    // 退会の記録（誰が・いつ・なぜ）。書き込みは Cloud Functions（deleteMyAccount /
+    // adminDeleteUser）のみ。運営が強制退会の経緯を確認するために read を許す。
+    match /accountDeletions/{uid} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    // 退会済みメールアドレスのハッシュ。再登録での紹介特典の取り直しを防ぐ台帳。
+    // 存在自体が判定材料なので本人にも見せない。
+    match /deletedEmails/{hash} {
       allow read: if isAdmin();
       allow create, update, delete: if false;
     }

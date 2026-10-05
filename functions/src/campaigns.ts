@@ -6,6 +6,8 @@
 import * as admin from "firebase-admin";
 import { https, logger, pubsub } from "firebase-functions/v1";
 
+import { wasDeletedEmail } from "./deletedEmails";
+
 // ========================================
 // キャンペーンの識別子
 // クーポンやレビューに保存し、後からキャンペーン単位で集計・打ち切りできるようにする。
@@ -762,11 +764,16 @@ export const applyReferralCode = https.onCall(
     const samePhone =
       !!normalizePhone(me.phone) &&
       normalizePhone(me.phone) === normalizePhone(referrer.phone);
+    // 退会したメールアドレスで登録し直した人は、紹介特典を一度受け取っている
+    // 可能性があるため特典を止める（運営が確認して解除できる）。
+    const rejoined = await wasDeletedEmail(me.email);
     const blockedReason = sameEmail
       ? "same_email"
       : samePhone
         ? "same_phone"
-        : "";
+        : rejoined
+          ? "rejoined"
+          : "";
 
     await db.runTransaction(async (tx) => {
       const ref = referralRef(uid);
@@ -852,9 +859,13 @@ export async function processReferralMilestones(
   const referrerGrantRef = couponGrantRef(grantKeys.referralReferrer(refereeUid));
 
   // 紹介者側の条件: 紹介者自身が過去に1回以上レッスンを完了していること
+  // 紹介者が退会済みなら紹介者特典は付与しない（被紹介者の特典はそのまま）
   let referrerHasCompletedLesson = false;
   if (completedCount >= REFERRER_REWARD_LESSON_COUNT) {
-    referrerHasCompletedLesson = (await countCompletedLessons(referrerUid)) >= 1;
+    const referrerSnap = await db.collection("users").doc(referrerUid).get();
+    const referrerDeleted = referrerSnap.data()?.status === "deleted";
+    referrerHasCompletedLesson =
+      !referrerDeleted && (await countCompletedLessons(referrerUid)) >= 1;
   }
 
   await db.runTransaction(async (tx) => {

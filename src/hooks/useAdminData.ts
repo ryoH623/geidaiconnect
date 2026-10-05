@@ -82,10 +82,13 @@ export function useAdminData(): AdminData {
             const x = d.data();
             return {
               id: d.id,
-              displayName: str(x.displayName),
+              // 退会済みは氏名が消えているため、一覧で分かるように表示名を補う
+              displayName:
+                x.status === "deleted" ? "（退会済み）" : str(x.displayName),
               email: str(x.email),
               role: str(x.role),
               phone: str(x.phone),
+              deleted: x.status === "deleted",
               createdAtMs: toMs(x.createdAt),
               birthday:
                 x.birthday && typeof x.birthday === "object"

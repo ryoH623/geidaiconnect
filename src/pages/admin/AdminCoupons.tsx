@@ -81,7 +81,7 @@ const AdminCoupons: React.FC = () => {
   const students = useMemo(
     () =>
       users
-        .filter((u) => u.role === 'student')
+        .filter((u) => u.role === 'student' && !u.deleted)
         .sort((a, b) => a.displayName.localeCompare(b.displayName, 'ja')),
     [users]
   );
