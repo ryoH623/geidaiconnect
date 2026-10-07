@@ -42,7 +42,7 @@
 | `reservations`（生徒） | 氏名・メール・金額・日時は会計記録として残す。`phone` / `notes` / `lessonLat` / `lessonLng` と、出張レッスンの `location`（生徒の住所）を消す。`studentDeleted: true` |
 | `reservationPayouts` | 変更しない |
 | `schedules`（講師） | 予約の入っていない枠（`reserved` / `booked` 以外）を削除 |
-| `teacherProfiles`（講師） | `published: false`, `withdrawn: true` |
+| `teacherProfiles`（講師） | `published: false`, `status: "withdrawn"`, `withdrawn: true`。管理画面から再公開はできない |
 | `deletedEmails/{sha256(メール)}` | 再登録の判定用。メールアドレスそのものは残さない |
 | `accountDeletions/{uid}` | 退会の記録（誰が・いつ・なぜ・件数） |
 | メール | 本人に退会完了（強制退会の場合は削除）の通知 |
@@ -60,8 +60,10 @@
 
 ## 5. 運用上の注意
 
-- **トップページの静的講師データ（`src/data/teachers.ts`）は自動では消えない。**
-  講師が退会した場合、そこに載っていれば手で削除してデプロイする。
+- 公開中の講師一覧・詳細は `teacherProfiles`（`published == true`）から読むため、退会した講師は自動で表示されなくなる。
+  `src/data/teachers.ts` は移行用の初期データで、取り込みは既存のドキュメントを上書きしないため退会者が復活することもない。
+- 別の端末にログイン状態が残っている場合は、`AuthContext` が `status: "deleted"` を見てログアウトさせる。
+  Firestore ルールでも退会済みの `users` は更新できない。
 - 退会者から「レビュー本文に個人が特定できる内容がある」と削除依頼があれば、`/admin/reviews` から個別に削除する。
 - 退会した講師の過去の予約・手数料明細は残る。講師への未払いの報酬がある場合は、退会前に精算を済ませる。
 - 予約記録の保存期間（会計記録として7年を想定）を過ぎたものの削除は未実装。

@@ -31,6 +31,7 @@ const STATUS_LABELS: Record<string, string> = {
   draft: "下書き",
   pending: "公開申請中",
   published: "公開中",
+  withdrawn: "退会済み",
 };
 
 const AdminTeacherProfiles: React.FC = () => {
@@ -276,6 +277,11 @@ const AdminTeacherProfiles: React.FC = () => {
     const next = !p.published;
 
     if (next) {
+      // 退会した講師はログインできず予約を受けられないため、公開させない
+      if (p.status === "withdrawn") {
+        alert(`${p.name} は退会済みのため公開できません。`);
+        return;
+      }
       const courses = getCourses(p);
       if (courses.length === 0) {
         alert("コースが1件も登録されていないため公開できません。");

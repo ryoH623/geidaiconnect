@@ -135,7 +135,12 @@ export const saveMyTeacherProfile = https.onCall(
     const db = admin.firestore();
 
     const userSnap = await db.collection("users").doc(uid).get();
-    if (!userSnap.exists || String(userSnap.data()?.role || "") !== "teacher") {
+    // 退会済み（status: deleted）は role が残っているため明示的に弾く
+    if (
+      !userSnap.exists ||
+      String(userSnap.data()?.role || "") !== "teacher" ||
+      userSnap.data()?.status === "deleted"
+    ) {
       throw new https.HttpsError("permission-denied", "講師アカウントのみ編集できます。");
     }
 

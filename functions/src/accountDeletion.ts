@@ -297,6 +297,8 @@ async function deleteAccount(uid: string, by: DeletedBy): Promise<DeletionSummar
       doc.ref,
       {
         published: false,
+        // 管理画面の公開状態の表示と、再公開の禁止に使う
+        status: "withdrawn",
         withdrawn: true,
         withdrawnAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),

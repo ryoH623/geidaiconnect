@@ -28,8 +28,12 @@ service cloud.firestore {
       allow read: if (isSignedIn() && request.auth.uid == uid) || isAdmin();
       // 更新は本人のみ。ただし role の変更は禁止（admin への自己昇格を防ぐ）。
       // admin 付与は Firebase コンソール / Admin SDK（ルールをバイパス）でのみ行う。
+      // 退会済み（status: deleted）の印は書き換えさせない。Auth を削除しても
+      // 発行済みの ID トークンはしばらく有効なため、別端末に残ったログイン状態から
+      // 会員情報を書き戻されるのを防ぐ。
       allow update: if isSignedIn() && request.auth.uid == uid
-        && request.resource.data.role == resource.data.role;
+        && request.resource.data.role == resource.data.role
+        && resource.data.get('status', '') != 'deleted';
       // 削除はクライアントから禁止。退会は deleteMyAccount（Cloud Functions）が行い、
       // 予約やクーポンの後始末と合わせて users を「退会済み」に置き換える。
       // ここで消せると、後始末をせずに users だけが消えた状態を作れてしまう。
