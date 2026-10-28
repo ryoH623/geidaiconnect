@@ -23,6 +23,7 @@ interface TeacherApplicationPayload {
   gender: string;
   birthday: { year: string; month: string; day: string };
   address: { prefecture: string; city: string; town: string; line: string };
+  lessonTypes: string[];
   subject: string;
   graduationYear: number;
   bio: string;
@@ -42,6 +43,9 @@ const GENDERS = [
   { value: "female", label: "女性" },
   { value: "other", label: "その他・回答しない" },
 ];
+
+/** 希望レッスン形態の選択肢。講師プロフィールのコース種別と揃える */
+const LESSON_TYPES = ["自宅", "スタジオ", "出張", "オンライン"];
 
 const GRADUATION_YEARS = Array.from(
   { length: CURRENT_YEAR - 1960 + 1 },
@@ -88,7 +92,17 @@ const TeacherRecruit: React.FC = () => {
   const [birthD, setBirthD] = useState("");
   const [address, setAddress] = useState<AddressValue>(EMPTY_ADDRESS);
   const [addressLine, setAddressLine] = useState("");
+  const [lessonTypes, setLessonTypes] = useState<string[]>([]);
   const [subject, setSubject] = useState("");
+
+  // 住所は市区町村まで。自宅レッスンを希望する人だけ、会場になるため番地まで尋ねる
+  const wantsHome = lessonTypes.includes("自宅");
+
+  const toggleLessonType = (type: string) => {
+    setLessonTypes((prev) =>
+      prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
+    );
+  };
   const [graduationYear, setGraduationYear] = useState("");
   const [bio, setBio] = useState("");
 
@@ -107,7 +121,7 @@ const TeacherRecruit: React.FC = () => {
       next.email = "メールアドレスの形式が正しくありません。";
     if (!/^\d{10,11}$/.test(phone.replace(/[-\s　]/g, "")))
       next.phone = "電話番号は10〜11桁の数字で入力してください。";
-    if (!/^\d{7}$/.test(postalCode.replace(/[-\s　]/g, "")))
+    if (wantsHome && !/^\d{7}$/.test(postalCode.replace(/[-\s　]/g, "")))
       next.postalCode = "郵便番号は7桁の数字で入力してください。";
     if (!gender) next.gender = "性別を選択してください。";
     if (!birthY || !birthM || !birthD) {
@@ -121,9 +135,15 @@ const TeacherRecruit: React.FC = () => {
       if (age !== null && age < ADULT_AGE)
         next.birthday = `講師のご応募は${ADULT_AGE}歳以上の方に限らせていただいております。`;
     }
-    if (!address.prefecture || !address.city || !address.town)
-      next.address = "都道府県・市区町村・町名を選択してください。";
-    if (!addressLine.trim()) next.addressLine = "番地・建物名等を入力してください。";
+    if (lessonTypes.length === 0)
+      next.lessonTypes = "希望するレッスン形態を1つ以上選択してください。";
+    if (wantsHome) {
+      if (!address.prefecture || !address.city || !address.town)
+        next.address = "都道府県・市区町村・町名を選択してください。";
+      if (!addressLine.trim()) next.addressLine = "番地・建物名等を入力してください。";
+    } else if (!address.prefecture || !address.city) {
+      next.address = "都道府県・市区町村を選択してください。";
+    }
     if (!subject) next.subject = "専攻を選択してください。";
     if (!graduationYear) next.graduationYear = "卒業・修了年を選択してください。";
     if (!bio.trim()) next.bio = "経歴・自己PRを入力してください。";
@@ -151,15 +171,17 @@ const TeacherRecruit: React.FC = () => {
         furigana: furigana.trim(),
         email: email.trim(),
         phone: phone.replace(/[-\s　]/g, ""),
-        postalCode: postalCode.replace(/[-\s　]/g, ""),
+        // 自宅レッスンを希望しない場合、番地などは入力途中のものが残っていても送らない
+        postalCode: wantsHome ? postalCode.replace(/[-\s　]/g, "") : "",
         gender,
         birthday: { year: birthY, month: birthM, day: birthD },
         address: {
           prefecture: address.prefecture,
           city: address.city,
-          town: address.town,
-          line: addressLine.trim(),
+          town: wantsHome ? address.town : "",
+          line: wantsHome ? addressLine.trim() : "",
         },
+        lessonTypes,
         subject,
         graduationYear: Number(graduationYear),
         bio: bio.trim(),
@@ -365,40 +387,77 @@ const TeacherRecruit: React.FC = () => {
                 </div>
 
                 <div className="form-group" style={{ marginBottom: "1rem" }}>
-                  <label htmlFor="recruit-postal">郵便番号{requiredMark}</label>
-                  <input
-                    id="recruit-postal"
-                    type="text"
-                    inputMode="numeric"
-                    value={postalCode}
-                    onChange={(e) =>
-                      setPostalCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 7))
-                    }
-                    maxLength={7}
-                    placeholder="例）1500031（ハイフンなし）"
-                    style={{ width: "100%" }}
-                  />
-                  {errors.postalCode && <p className="form-error">{errors.postalCode}</p>}
+                  <span>希望レッスン形態{requiredMark}</span>
+                  <p style={{ fontSize: "0.85rem", color: "#666", margin: "0.2rem 0 0.4rem" }}>
+                    複数選択できます。登録後にコースを作るときに変更できます。
+                  </p>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem 1.25rem" }}>
+                    {LESSON_TYPES.map((type) => (
+                      <label
+                        key={type}
+                        style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={lessonTypes.includes(type)}
+                          onChange={() => toggleLessonType(type)}
+                        />
+                        {type}
+                      </label>
+                    ))}
+                  </div>
+                  {errors.lessonTypes && <p className="form-error">{errors.lessonTypes}</p>}
                 </div>
+
+                {wantsHome && (
+                  <div className="form-group" style={{ marginBottom: "1rem" }}>
+                    <label htmlFor="recruit-postal">郵便番号{requiredMark}</label>
+                    <input
+                      id="recruit-postal"
+                      type="text"
+                      inputMode="numeric"
+                      value={postalCode}
+                      onChange={(e) =>
+                        setPostalCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 7))
+                      }
+                      maxLength={7}
+                      placeholder="例）1500031（ハイフンなし）"
+                      style={{ width: "100%" }}
+                    />
+                    {errors.postalCode && <p className="form-error">{errors.postalCode}</p>}
+                  </div>
+                )}
 
                 <div className="form-group" style={{ marginBottom: "1rem" }}>
                   <label htmlFor="recruit-addr-prefecture">住所{requiredMark}</label>
+                  <p style={{ fontSize: "0.85rem", color: "#666", margin: "0.2rem 0 0.4rem" }}>
+                    {wantsHome
+                      ? "自宅レッスンの会場として、番地・建物名までご入力ください。ご予約が確定した生徒にのみお知らせします。"
+                      : "市区町村までご入力ください。"}
+                  </p>
                   <AddressCascadeSelect
                     value={address}
                     onChange={setAddress}
                     idPrefix="recruit-addr"
+                    hideTown={!wantsHome}
                   />
                   {errors.address && <p className="form-error">{errors.address}</p>}
-                  <input
-                    id="recruit-address-line"
-                    type="text"
-                    value={addressLine}
-                    onChange={(e) => setAddressLine(e.target.value)}
-                    maxLength={200}
-                    placeholder="番地・建物名等（例：1-2-3 ○○マンション101）"
-                    style={{ width: "100%", marginTop: "0.5rem" }}
-                  />
-                  {errors.addressLine && <p className="form-error">{errors.addressLine}</p>}
+                  {wantsHome && (
+                    <>
+                      <input
+                        id="recruit-address-line"
+                        type="text"
+                        value={addressLine}
+                        onChange={(e) => setAddressLine(e.target.value)}
+                        maxLength={200}
+                        placeholder="番地・建物名等（例：1-2-3 ○○マンション101）"
+                        style={{ width: "100%", marginTop: "0.5rem" }}
+                      />
+                      {errors.addressLine && (
+                        <p className="form-error">{errors.addressLine}</p>
+                      )}
+                    </>
+                  )}
                 </div>
 
                 <div className="form-group" style={{ marginBottom: "1rem" }}>

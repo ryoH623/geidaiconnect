@@ -5,6 +5,7 @@ import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../firebase";
 import { ADULT_AGE, calcAge, isValidBirthday } from "../lib/age";
+import { usePrefectureCities } from "../hooks/useJapaneseAddresses";
 
 type Gender = "" | "male" | "female" | "other";
 
@@ -37,10 +38,9 @@ const Register: React.FC = () => {
   const [firstName, setFirstName] = useState("");
   const [lastNameKana, setLastNameKana] = useState("");
   const [firstNameKana, setFirstNameKana] = useState("");
-  const [postalCode, setPostalCode] = useState("");
   const [prefecture, setPrefecture] = useState("");
-  const [address1, setAddress1] = useState("");
-  const [address2, setAddress2] = useState("");
+  // 住所は市区町村まで。生徒の番地は出張レッスンの予約時、講師の番地は自宅コースを作るときに入力してもらう
+  const [city, setCity] = useState("");
   const [phone, setPhone] = useState("");
   const [gender, setGender] = useState<Gender>("");
   const [birthY, setBirthY] = useState("");
@@ -103,14 +103,12 @@ const Register: React.FC = () => {
           setLastNameKana((v) => v || kLast || "");
           setFirstNameKana((v) => v || kRest.join("") || "");
           setPhone((v) => v || String(p.phone || ""));
-          setPostalCode((v) => v || String(p.postalCode || ""));
           setGender((v) => v || ((p.gender || "") as Gender));
           setBirthY((v) => v || String(p.birthYear || ""));
           setBirthM((v) => v || String(p.birthMonth || ""));
           setBirthD((v) => v || String(p.birthDay || ""));
           setPrefecture((v) => v || String(p.prefecture || ""));
-          setAddress1((v) => v || [p.city, p.town].filter(Boolean).join(""));
-          setAddress2((v) => v || String(p.line || ""));
+          setCity((v) => v || String(p.city || ""));
         }
       } catch (err) {
         console.error("[register] 招待の確認に失敗:", err);
@@ -127,9 +125,6 @@ const Register: React.FC = () => {
       cancelled = true;
     };
   }, [inviteToken]);
-
-  // 郵便番号検索のローディング
-  const [isSearchingZip, setIsSearchingZip] = useState(false);
 
   const prefectures = [
     "北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県",
@@ -156,25 +151,10 @@ const Register: React.FC = () => {
   );
   const minor = age !== null && age < ADULT_AGE;
 
-  const handlePostalBlur = async () => {
-    if (postalCode.length !== 7) return;
-    try {
-      setIsSearchingZip(true);
-      const res = await fetch(`https://zipcloud.ibsnet.co.jp/api/search?zipcode=${postalCode}`);
-      const data: any = await res.json();
-      if (data?.results?.length) {
-        const r = data.results[0];
-        setPrefecture(r.address1 || "");
-        setAddress1(`${r.address2 || ""}${r.address3 || ""}`);
-      } else {
-        console.warn("郵便番号から住所が見つかりませんでした");
-      }
-    } catch (e) {
-      console.error("郵便番号検索に失敗しました", e);
-    } finally {
-      setIsSearchingZip(false);
-    }
-  };
+  // 市区町村の候補。マスタが取れないときは自由入力に切り替える
+  const { data: prefCityMap, error: prefCityError } = usePrefectureCities();
+  const cities = prefCityMap && prefecture ? prefCityMap[prefecture] ?? [] : [];
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -182,7 +162,7 @@ const Register: React.FC = () => {
 
     if (
       !lastName || !firstName || !lastNameKana || !firstNameKana ||
-      !prefecture || !address1 || !phone || !gender ||
+      !prefecture || !city || !phone || !gender ||
       !birthY || !birthM || !birthD || !email
     ) {
       setError("必須項目（*）を入力してください。");
@@ -251,10 +231,10 @@ const Register: React.FC = () => {
           firstName,
           lastNameKana,
           firstNameKana,
-          postalCode: postalCode || null,
+          // 住所は市区町村まで。講師の自宅住所（番地まで）は、応募時に入力していれば
+          // acceptTeacherInvite が引き継ぎ、無ければ自宅コースを作るときに講師プロフィール画面で入力する。
           prefecture: prefecture || null,
-          address1: address1 || null,
-          address2: address2 || null,
+          city: city || null,
           phone: phone || null,
           gender: gender || null,
           birthday: birthY && birthM && birthD
@@ -398,44 +378,37 @@ const Register: React.FC = () => {
             <input placeholder="メイ" value={firstNameKana} onChange={e => setFirstNameKana(e.target.value)} required />
           </div>
 
-          <label>郵便番号</label>
-          <div className="postal-row">
-            <div className="mark">〒</div>
-            <input
-              placeholder="例）1500031"
-              value={postalCode}
-              onChange={e => setPostalCode(e.target.value.replace(/[^0-9]/g, ""))}
-              onBlur={handlePostalBlur}
-              inputMode="numeric"
-            />
-          </div>
-          {isSearchingZip && (
-            <>
-              <label></label>
-              <div style={{ fontSize: "12px", color: "#777" }}>郵便番号から住所を取得しています…</div>
-            </>
-          )}
-
           <label>都道府県<span className="req">*</span></label>
-          <select value={prefecture} onChange={e => setPrefecture(e.target.value)} required>
+          <select
+            value={prefecture}
+            onChange={e => { setPrefecture(e.target.value); setCity(""); }}
+            required
+          >
             <option value="">選択してください</option>
             {prefectures.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
 
-          <label>住所1（市部区／町・村）<span className="req">*</span></label>
-          <input
-            placeholder="例）〇〇市△△区□町"
-            value={address1}
-            onChange={e => setAddress1(e.target.value)}
-            required
-          />
-
-          <label className="nowrap">住所2（丁目・番地・マンション名・号室）</label>
-          <input
-            placeholder="例）△△ 1-4 ○○マンション101号"
-            value={address2}
-            onChange={e => setAddress2(e.target.value)}
-          />
+          <label>市区町村<span className="req">*</span></label>
+          {prefCityError ? (
+            <input
+              placeholder="例）世田谷区"
+              value={city}
+              onChange={e => setCity(e.target.value)}
+              required
+            />
+          ) : (
+            <select
+              value={city}
+              onChange={e => setCity(e.target.value)}
+              disabled={!prefecture || !prefCityMap}
+              required
+            >
+              <option value="">
+                {!prefecture ? "先に都道府県を選択してください" : !prefCityMap ? "読み込み中..." : "選択してください"}
+              </option>
+              {cities.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
 
           <label>電話番号<span className="req">*</span></label>
           <input

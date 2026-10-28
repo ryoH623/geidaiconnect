@@ -7,7 +7,7 @@ import { perTeacherStats, yen } from "../../lib/adminStats";
 const AdminTeachers: React.FC = () => {
   const { reservations, users, reviews, loading, error } = useAdminData();
 
-  const teachers = useMemo(() => users.filter((u) => u.role === "teacher"), [users]);
+  const teachers = useMemo(() => users.filter((u) => u.role === "teacher" && !u.deleted), [users]);
   const stats = useMemo(
     () => perTeacherStats(teachers, reservations, reviews),
     [teachers, reservations, reviews]

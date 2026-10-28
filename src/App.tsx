@@ -28,6 +28,7 @@ import MyPage from "./pages/MyPage";
 import Profile from "./pages/Profile";
 import StudentReservations from "./pages/student/StudentReservations";
 import ReferralPage from "./pages/student/ReferralPage";
+import Withdraw from "./pages/Withdraw";
 import ProtectedRoute from "./ProtectedRoute";
 
 // 予約フォームと講師・管理画面はバンドルが大きく、初期表示では不要なため遅延読み込みする
@@ -136,6 +137,10 @@ function App() {
               </ProtectedRoute>
             }
           />
+
+          {/* 退会。完了後はログアウト状態で完了画面を出すため ProtectedRoute で包まない
+              （未ログイン時のログイン画面への誘導はページ側で行う） */}
+          <Route path="/mypage/withdraw" element={<Withdraw />} />
 
           {/* 🔐 講師専用ルート（ガード付き） */}
           <Route

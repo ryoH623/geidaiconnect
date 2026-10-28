@@ -1,6 +1,6 @@
 // src/contexts/AuthContext.tsx
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { onAuthStateChanged, User as FirebaseUser } from "firebase/auth";
+import { onAuthStateChanged, signOut, User as FirebaseUser } from "firebase/auth";
 import { auth, db } from "../firebase";
 import { doc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 
@@ -36,7 +36,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (firebaseUser) {
         try {
           const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
-          if (userDoc.exists()) {
+          if (userDoc.exists() && userDoc.data().status === "deleted") {
+            // 退会済み。別の端末で退会した場合など、ログイン状態だけが残っていることがある
+            // （Auth のアカウントは削除済みだが、手元のトークンはしばらく有効なため）
+            await signOut(auth).catch(() => undefined);
+            setUser(null);
+            setRole(null);
+          } else if (userDoc.exists()) {
             const userData = userDoc.data();
 
             // メールアドレス変更（verifyBeforeUpdateEmail）は Auth 側だけ先に変わるため、

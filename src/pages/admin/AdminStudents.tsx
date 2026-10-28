@@ -18,7 +18,7 @@ const AdminStudents: React.FC = () => {
       spend.set(r.userId, cur);
     }
     return users
-      .filter((u) => u.role === "student")
+      .filter((u) => u.role === "student" && !u.deleted)
       .map((u) => {
         const age = calcAge(u.birthday);
         return {

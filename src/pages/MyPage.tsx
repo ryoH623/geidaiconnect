@@ -87,6 +87,15 @@ const MyPage: React.FC = () => {
         </div>
 
         {canOwnCode && <ReferralCodeCard heading="あなたの紹介コード" />}
+
+        {/* 管理者は退会の対象外（functions 側の deleteAccount と揃える） */}
+        {role !== "admin" && (
+          <p style={{ textAlign: "center", marginTop: "3rem", fontSize: "0.9rem" }}>
+            <Link to="/mypage/withdraw" style={{ color: "#8a8270" }}>
+              退会について
+            </Link>
+          </p>
+        )}
       </div>
     </main>
   );

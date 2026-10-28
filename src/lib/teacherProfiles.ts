@@ -57,7 +57,8 @@ export interface LessonCourse {
 }
 
 /** 公開状態。draft と pending はサイトに出ない */
-export type TeacherStatus = 'draft' | 'pending' | 'published';
+// withdrawn は講師の退会（functions/src/accountDeletion.ts）で付く。再公開はできない
+export type TeacherStatus = 'draft' | 'pending' | 'published' | 'withdrawn';
 
 export interface TeacherProfile {
   /** ドキュメントID。講師詳細ページ（/teachers/:id）の URL に使うスラッグ */

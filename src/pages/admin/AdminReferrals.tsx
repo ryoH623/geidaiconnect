@@ -11,6 +11,7 @@ import { useCampaignAdminData } from '../../hooks/useCampaignAdminData';
 import type { AdminReferral } from '../../hooks/useCampaignAdminData';
 import {
   REFERRAL_STATUS_LABEL,
+  blockedReasonText,
   formatTimestamp,
 } from '../../lib/campaignLabels';
 
@@ -225,7 +226,7 @@ const AdminReferrals: React.FC = () => {
                             無効化
                             {r.blockedReason && (
                               <div style={{ fontSize: '0.75rem', color: '#8a8270' }}>
-                                {r.blockedReason}
+                                {blockedReasonText(r.blockedReason)}
                               </div>
                             )}
                           </span>

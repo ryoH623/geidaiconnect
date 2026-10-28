@@ -47,6 +47,13 @@ export {
 // 講師本人によるプロフィール・コースの編集。実装は teacherProfileEdit.ts にある。
 export { saveMyTeacherProfile } from "./teacherProfileEdit";
 
+// 退会（本人・運営による強制退会）。実装は accountDeletion.ts にある。
+export {
+  checkMyAccountDeletion,
+  deleteMyAccount,
+  adminDeleteUser,
+} from "./accountDeletion";
+
 // ========================================
 // Environment variables
 // ========================================
@@ -264,6 +271,28 @@ function studentEmailOf(r: any): string {
 }
 
 /**
+ * 自宅レッスンの会場になる講師の住所（番地まで）を users/{uid} から組み立てる。
+ * 講師ページ（teacherProfiles）には市区町村までしか載せないため、
+ * 番地は予約が確定した生徒にだけ、予約確認メールで知らせる。番地が無ければ空文字。
+ */
+async function teacherHomeAddressOf(teacherUid: string): Promise<string> {
+  const snap = await admin.firestore().collection("users").doc(teacherUid).get();
+  const u = snap.exists ? snap.data() || {} : {};
+  const s = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+
+  const line = s(u.address2);
+  if (!line) return "";
+
+  const prefecture = s(u.prefecture);
+  const city = s(u.city);
+  const town = s(u.address1);
+  // 以前の登録画面では address1 に「市区町村＋町名」を入れていたため、重ねて付けない
+  const head = town.startsWith(city) ? town : `${city}${town}`;
+  const postal = s(u.postalCode);
+  return `${postal ? `〒${postal.slice(0, 3)}-${postal.slice(3)} ` : ""}${prefecture}${head} ${line}`;
+}
+
+/**
  * 決済完了時の通知メール（生徒: 予約確定 / 講師: 新規予約）。
  * Webhook から呼ぶため、失敗しても throw しない。
  */
@@ -286,6 +315,36 @@ async function sendPaymentCompletedEmails(reservationId: string): Promise<void> 
     const studentEmail = studentEmailOf(r);
 
     if (studentEmail) {
+      // 自宅レッスンは、場所の行を講師の自宅住所（番地まで）に差し替える
+      let studentRows = reservationRows(r);
+      if (r.lessonType === "自宅" && typeof r.teacherId === "string" && r.teacherId) {
+        let homeAddress = "";
+        try {
+          homeAddress = await teacherHomeAddressOf(r.teacherId);
+        } catch (error) {
+          logger.warn("sendPaymentCompletedEmails: 講師の住所の取得に失敗", {
+            reservationId,
+            error,
+          });
+        }
+        if (!homeAddress) {
+          logger.warn("sendPaymentCompletedEmails: 講師の自宅住所が未登録", {
+            reservationId,
+            teacherId: r.teacherId,
+          });
+        }
+        studentRows = studentRows.map(([label, value]) =>
+          label === "場所"
+            ? [
+                label,
+                homeAddress
+                  ? `講師のご自宅（${homeAddress}）`
+                  : `${value}（詳しいご住所は運営より別途ご案内します）`,
+              ]
+            : [label, value]
+        );
+      }
+
       await sendMailSafe({
         to: studentEmail,
         subject: "【Geidai Connect】ご予約が確定しました",
@@ -295,7 +354,7 @@ async function sendPaymentCompletedEmails(reservationId: string): Promise<void> 
             "お支払いが完了し、レッスンのご予約が確定しました。",
             "ご予約内容は以下のとおりです。",
           ],
-          rows: reservationRows(r),
+          rows: studentRows,
           outro: [
             "レッスン当日はどうぞよろしくお願いいたします。",
             "ご予約内容はマイページの「予約履歴」からもご確認いただけます。",
@@ -3719,6 +3778,9 @@ export const submitRequest = https.onCall(
 // ========================================
 // Callable: 講師応募フォーム送信（未ログインでも可）
 // ========================================
+/** 応募フォームの希望レッスン形態。講師プロフィールのコース種別と揃える */
+const APPLICATION_LESSON_TYPES = ["自宅", "スタジオ", "出張", "オンライン"];
+
 export const submitTeacherApplication = https.onCall(
   async (
     data: {
@@ -3735,6 +3797,7 @@ export const submitTeacherApplication = https.onCall(
         town?: string;
         line?: string;
       };
+      lessonTypes?: string[];
       subject?: string;
       graduationYear?: number;
       bio?: string;
@@ -3747,8 +3810,23 @@ export const submitTeacherApplication = https.onCall(
     const furigana = str(data?.furigana);
     const email = str(data?.email);
     const phone = str(data?.phone);
-    const postalCode = str(data?.postalCode).replace(/[^0-9]/g, "");
-    if (!/^\d{7}$/.test(postalCode)) {
+
+    // 希望レッスン形態。自宅を希望する人だけ、会場になるため番地まで受け取る
+    const lessonTypes = Array.isArray(data?.lessonTypes)
+      ? APPLICATION_LESSON_TYPES.filter((t) => data.lessonTypes!.includes(t))
+      : [];
+    if (lessonTypes.length === 0) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "希望するレッスン形態を1つ以上選択してください。"
+      );
+    }
+    const wantsHome = lessonTypes.includes("自宅");
+
+    const postalCode = wantsHome
+      ? str(data?.postalCode).replace(/[^0-9]/g, "")
+      : "";
+    if (wantsHome && !/^\d{7}$/.test(postalCode)) {
       throw new https.HttpsError(
         "invalid-argument",
         "郵便番号は7桁の数字で入力してください。"
@@ -3783,8 +3861,8 @@ export const submitTeacherApplication = https.onCall(
     const address = {
       prefecture: str(data?.address?.prefecture),
       city: str(data?.address?.city),
-      town: str(data?.address?.town),
-      line: str(data?.address?.line),
+      town: wantsHome ? str(data?.address?.town) : "",
+      line: wantsHome ? str(data?.address?.line) : "",
     };
     const subject = str(data?.subject);
     const bio = str(data?.bio);
@@ -3797,8 +3875,7 @@ export const submitTeacherApplication = https.onCall(
       !phone ||
       !address.prefecture ||
       !address.city ||
-      !address.town ||
-      !address.line ||
+      (wantsHome && (!address.town || !address.line)) ||
       !subject ||
       !bio
     ) {
@@ -3865,6 +3942,7 @@ export const submitTeacherApplication = https.onCall(
         gender,
         birthday,
         address,
+        lessonTypes,
         subject,
         graduationYear,
         bio,
@@ -3892,9 +3970,10 @@ export const submitTeacherApplication = https.onCall(
           ["メールアドレス", email],
           ["電話番号", phone],
           ["生年月日", `${birthday.year}/${birthday.month}/${birthday.day}`],
+          ["希望レッスン形態", lessonTypes.join("・")],
           [
             "住所",
-            `${address.prefecture}${address.city}${address.town} ${address.line}`,
+            `${address.prefecture}${address.city}${address.town} ${address.line}`.trim(),
           ],
           ["専攻", subject],
           ["卒業年", `${graduationYear}年`],
