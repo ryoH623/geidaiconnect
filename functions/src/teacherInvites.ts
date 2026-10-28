@@ -387,9 +387,22 @@ export const acceptTeacherInvite = https.onCall(
       const profileRef = db.collection(TEACHER_PROFILES).doc(id);
       const profileSnap = await tx.get(profileRef);
 
+      // 会員登録画面では講師にも市区町村までしか尋ねない。
+      // 自宅レッスン希望で応募時に番地まで入力していれば、ここで引き継ぐ
+      // （講師プロフィール画面と同じく address1 = 町名、address2 = 番地・建物名）。
+      const invitePrefill = (invite.prefill || {}) as Record<string, unknown>;
+      const homeAddress = String(invitePrefill.line || "")
+        ? {
+            postalCode: String(invitePrefill.postalCode || ""),
+            address1: String(invitePrefill.town || ""),
+            address2: String(invitePrefill.line || ""),
+          }
+        : {};
+
       tx.update(userRef, {
         role: "teacher",
         teacherId: id,
+        ...homeAddress,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 

@@ -22,6 +22,8 @@ interface Props {
   idPrefix: string;
   /** true のとき町名の先頭に「（全域）」を追加する（出張エリア用） */
   allowWholeCity?: boolean;
+  /** true のとき町名欄を出さず、市区町村までを選ばせる */
+  hideTown?: boolean;
   disabled?: boolean;
 }
 
@@ -30,10 +32,15 @@ const AddressCascadeSelect: React.FC<Props> = ({
   onChange,
   idPrefix,
   allowWholeCity = false,
+  hideTown = false,
   disabled = false,
 }) => {
   const { data: prefCityMap, loading: prefLoading, error: prefError } = usePrefectureCities();
-  const { towns, loading: townsLoading, error: townsError } = useTowns(value.prefecture, value.city);
+  // 町名欄を出さないときは町名データを取りに行かない
+  const { towns, loading: townsLoading, error: townsError } = useTowns(
+    value.prefecture,
+    hideTown ? "" : value.city
+  );
 
   const prefectures = prefCityMap ? Object.keys(prefCityMap) : [];
   const cities = prefCityMap && value.prefecture ? prefCityMap[value.prefecture] ?? [] : [];
@@ -78,25 +85,27 @@ const AddressCascadeSelect: React.FC<Props> = ({
           ))}
         </select>
 
-        <select
-          id={`${idPrefix}-town`}
-          className="form-input"
-          style={{ flex: "1 1 30%", minWidth: "8.5em" }}
-          value={value.town}
-          disabled={disabled || !value.city || townsLoading}
-          onChange={(e) => onChange({ ...value, town: e.target.value })}
-          aria-label="町名"
-        >
-          <option value="">{townsLoading ? "読み込み中..." : "町名"}</option>
-          {allowWholeCity && value.city && !townsLoading && (
-            <option value={WHOLE_CITY}>（全域）</option>
-          )}
-          {towns.map((town) => (
-            <option key={town} value={town}>
-              {town}
-            </option>
-          ))}
-        </select>
+        {!hideTown && (
+          <select
+            id={`${idPrefix}-town`}
+            className="form-input"
+            style={{ flex: "1 1 30%", minWidth: "8.5em" }}
+            value={value.town}
+            disabled={disabled || !value.city || townsLoading}
+            onChange={(e) => onChange({ ...value, town: e.target.value })}
+            aria-label="町名"
+          >
+            <option value="">{townsLoading ? "読み込み中..." : "町名"}</option>
+            {allowWholeCity && value.city && !townsLoading && (
+              <option value={WHOLE_CITY}>（全域）</option>
+            )}
+            {towns.map((town) => (
+              <option key={town} value={town}>
+                {town}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
       {error && <p className="form-error">{error}</p>}
     </div>

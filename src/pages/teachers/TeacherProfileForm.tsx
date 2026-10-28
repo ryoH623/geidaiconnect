@@ -214,6 +214,8 @@ const TeacherProfileForm: React.FC = () => {
 
   // 出張コースがある場合だけ、出張可能な範囲を聞く
   const hasTravelCourse = courses.some((c) => c.type === "出張");
+  // 自宅コースがある場合だけ、会場になる自宅の番地までを必須にする
+  const hasHomeCourse = courses.some((c) => c.type === "自宅");
 
   const toggleIn = (list: string[], value: string): string[] =>
     list.includes(value) ? list.filter((x) => x !== value) : [...list, value];
@@ -253,6 +255,9 @@ const TeacherProfileForm: React.FC = () => {
     }
     if (submit && hasTravelCourse && !travelRange) {
       return "出張レッスンのコースがあるため、出張可能な範囲を選択してください。";
+    }
+    if (submit && hasHomeCourse && (!/^\d{7}$/.test(postalCode) || !addressLine.trim())) {
+      return "自宅レッスンのコースがあるため、郵便番号と番地・建物名を入力してください。";
     }
     return "";
   };
@@ -448,7 +453,10 @@ const TeacherProfileForm: React.FC = () => {
                 style={inputStyle}
               />
               <span style={{ fontSize: "0.8rem", color: "#666" }}>
-                こちらは公開されません。運営からのご連絡にのみ使用します。
+                {hasHomeCourse
+                  ? "自宅レッスンのコースがあるため必須です。"
+                  : "自宅レッスンのコースを作る場合は必須です。"}
+                講師ページには掲載されず、自宅レッスンのご予約が確定した生徒にのみ予約確認メールでお知らせします。
               </span>
             </label>
           </div>

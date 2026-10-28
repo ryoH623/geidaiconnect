@@ -173,6 +173,20 @@ export const saveMyTeacherProfile = https.onCall(
     }
     const courses = rawCourses.map((c, i) => sanitizeCourse(c, i));
 
+    // 自宅コースは講師の自宅が会場になり、予約確認メールで生徒に番地まで知らせる。
+    // 番地が無いまま公開されると生徒が会場に辿り着けないため、公開申請時に必須にする。
+    if (
+      data?.submit === true &&
+      courses.some((c) => c.type === "自宅") &&
+      (!/^\d{7}$/.test(str(data?.postalCode, 10).replace(/[^0-9]/g, "")) ||
+        !str(data?.addressLine, 200))
+    ) {
+      throw new https.HttpsError(
+        "failed-precondition",
+        "自宅レッスンのコースがあるため、郵便番号と番地・建物名を入力してください。"
+      );
+    }
+
     const submit = data?.submit === true;
     if (submit && courses.length === 0) {
       throw new https.HttpsError(
@@ -233,6 +247,8 @@ export const saveMyTeacherProfile = https.onCall(
     };
     if (postalCode) addressUpdate.postalCode = postalCode;
     addressUpdate.prefecture = str(data?.prefecture, 20);
+    // 予約確認メールで「都道府県＋市区町村＋町名＋番地」を組み立てるため、市区町村も users に持たせる
+    addressUpdate.city = str(data?.city, 50);
     addressUpdate.address1 = str(data?.town, 100);
     addressUpdate.address2 = str(data?.addressLine, 200);
 

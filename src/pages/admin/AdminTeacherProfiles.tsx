@@ -59,6 +59,7 @@ const AdminTeacherProfiles: React.FC = () => {
     name: string;
     email: string;
     subject: string;
+    lessonTypes: string[];
     status: string;
     seconds: number;
   };
@@ -102,6 +103,7 @@ const AdminTeacherProfiles: React.FC = () => {
             name: typeof x.name === "string" ? x.name : "",
             email: typeof x.email === "string" ? x.email : "",
             subject: typeof x.subject === "string" ? x.subject : "",
+            lessonTypes: Array.isArray(x.lessonTypes) ? x.lessonTypes.map(String) : [],
             status: typeof x.status === "string" ? x.status : "new",
             seconds: x.createdAt?.seconds ?? 0,
           };
@@ -384,6 +386,7 @@ const AdminTeacherProfiles: React.FC = () => {
                   <span style={{ fontSize: "0.9rem" }}>
                     {a.name}
                     {a.subject && `（${a.subject}）`}
+                    {a.lessonTypes.length > 0 && ` 希望: ${a.lessonTypes.join("・")}`}
                     <br />
                     <span style={{ color: "#888", fontSize: "0.8rem" }}>
                       {a.email}
