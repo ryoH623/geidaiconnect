@@ -5,6 +5,7 @@ import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../firebase";
 import { ADULT_AGE, calcAge, isValidBirthday } from "../lib/age";
+import { usePrefectureCities } from "../hooks/useJapaneseAddresses";
 
 type Gender = "" | "male" | "female" | "other";
 
@@ -39,6 +40,8 @@ const Register: React.FC = () => {
   const [firstNameKana, setFirstNameKana] = useState("");
   const [postalCode, setPostalCode] = useState("");
   const [prefecture, setPrefecture] = useState("");
+  // 生徒は市区町村まで。番地などの詳細は出張レッスンの予約時にだけ入力してもらう
+  const [city, setCity] = useState("");
   const [address1, setAddress1] = useState("");
   const [address2, setAddress2] = useState("");
   const [phone, setPhone] = useState("");
@@ -156,6 +159,10 @@ const Register: React.FC = () => {
   );
   const minor = age !== null && age < ADULT_AGE;
 
+  // 市区町村の候補。マスタが取れないときは自由入力に切り替える
+  const { data: prefCityMap, error: prefCityError } = usePrefectureCities();
+  const cities = prefCityMap && prefecture ? prefCityMap[prefecture] ?? [] : [];
+
   const handlePostalBlur = async () => {
     if (postalCode.length !== 7) return;
     try {
@@ -182,7 +189,7 @@ const Register: React.FC = () => {
 
     if (
       !lastName || !firstName || !lastNameKana || !firstNameKana ||
-      !prefecture || !address1 || !phone || !gender ||
+      !prefecture || !(isTeacherSignup ? address1 : city) || !phone || !gender ||
       !birthY || !birthM || !birthD || !email
     ) {
       setError("必須項目（*）を入力してください。");
@@ -251,10 +258,19 @@ const Register: React.FC = () => {
           firstName,
           lastNameKana,
           firstNameKana,
-          postalCode: postalCode || null,
-          prefecture: prefecture || null,
-          address1: address1 || null,
-          address2: address2 || null,
+          // 講師は自宅レッスンの会場になるため番地まで持つ（講師プロフィール画面で使う）。
+          // 生徒は市区町村までしか保存しない。
+          ...(isTeacherSignup
+            ? {
+                postalCode: postalCode || null,
+                prefecture: prefecture || null,
+                address1: address1 || null,
+                address2: address2 || null,
+              }
+            : {
+                prefecture: prefecture || null,
+                city: city || null,
+              }),
           phone: phone || null,
           gender: gender || null,
           birthday: birthY && birthM && birthD
@@ -398,44 +414,82 @@ const Register: React.FC = () => {
             <input placeholder="メイ" value={firstNameKana} onChange={e => setFirstNameKana(e.target.value)} required />
           </div>
 
-          <label>郵便番号</label>
-          <div className="postal-row">
-            <div className="mark">〒</div>
-            <input
-              placeholder="例）1500031"
-              value={postalCode}
-              onChange={e => setPostalCode(e.target.value.replace(/[^0-9]/g, ""))}
-              onBlur={handlePostalBlur}
-              inputMode="numeric"
-            />
-          </div>
-          {isSearchingZip && (
+          {isTeacherSignup ? (
             <>
-              <label></label>
-              <div style={{ fontSize: "12px", color: "#777" }}>郵便番号から住所を取得しています…</div>
+              <label>郵便番号</label>
+              <div className="postal-row">
+                <div className="mark">〒</div>
+                <input
+                  placeholder="例）1500031"
+                  value={postalCode}
+                  onChange={e => setPostalCode(e.target.value.replace(/[^0-9]/g, ""))}
+                  onBlur={handlePostalBlur}
+                  inputMode="numeric"
+                />
+              </div>
+              {isSearchingZip && (
+                <>
+                  <label></label>
+                  <div style={{ fontSize: "12px", color: "#777" }}>郵便番号から住所を取得しています…</div>
+                </>
+              )}
+
+              <label>都道府県<span className="req">*</span></label>
+              <select value={prefecture} onChange={e => setPrefecture(e.target.value)} required>
+                <option value="">選択してください</option>
+                {prefectures.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+
+              <label>住所1（市部区／町・村）<span className="req">*</span></label>
+              <input
+                placeholder="例）〇〇市△△区□町"
+                value={address1}
+                onChange={e => setAddress1(e.target.value)}
+                required
+              />
+
+              <label className="nowrap">住所2（丁目・番地・マンション名・号室）</label>
+              <input
+                placeholder="例）△△ 1-4 ○○マンション101号"
+                value={address2}
+                onChange={e => setAddress2(e.target.value)}
+              />
+            </>
+          ) : (
+            <>
+              <label>都道府県<span className="req">*</span></label>
+              <select
+                value={prefecture}
+                onChange={e => { setPrefecture(e.target.value); setCity(""); }}
+                required
+              >
+                <option value="">選択してください</option>
+                {prefectures.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+
+              <label>市区町村<span className="req">*</span></label>
+              {prefCityError ? (
+                <input
+                  placeholder="例）世田谷区"
+                  value={city}
+                  onChange={e => setCity(e.target.value)}
+                  required
+                />
+              ) : (
+                <select
+                  value={city}
+                  onChange={e => setCity(e.target.value)}
+                  disabled={!prefecture || !prefCityMap}
+                  required
+                >
+                  <option value="">
+                    {!prefecture ? "先に都道府県を選択してください" : !prefCityMap ? "読み込み中..." : "選択してください"}
+                  </option>
+                  {cities.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              )}
             </>
           )}
-
-          <label>都道府県<span className="req">*</span></label>
-          <select value={prefecture} onChange={e => setPrefecture(e.target.value)} required>
-            <option value="">選択してください</option>
-            {prefectures.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
-
-          <label>住所1（市部区／町・村）<span className="req">*</span></label>
-          <input
-            placeholder="例）〇〇市△△区□町"
-            value={address1}
-            onChange={e => setAddress1(e.target.value)}
-            required
-          />
-
-          <label className="nowrap">住所2（丁目・番地・マンション名・号室）</label>
-          <input
-            placeholder="例）△△ 1-4 ○○マンション101号"
-            value={address2}
-            onChange={e => setAddress2(e.target.value)}
-          />
 
           <label>電話番号<span className="req">*</span></label>
           <input
