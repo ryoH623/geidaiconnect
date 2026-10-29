@@ -626,6 +626,185 @@ a[href^="mailto"] {
 .status-badge--red   { background: #fdeeee; color: #a12626; border-color: #f2c7c7; }
 .status-badge--gray  { background: #f2f0eb; color: #6f6857; border-color: #e1ddd3; }
 
+.admin-table tbody tr.is-clickable {
+  cursor: pointer;
+}
+
+.status-stack--row {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.admin-tool-button {
+  padding: 0.45rem 0.9rem;
+  border: 1px solid #b89f6b;
+  border-radius: 8px;
+  background: #fff;
+  color: #6b5427;
+  font-size: 0.9rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.admin-tool-button:hover:not(:disabled) {
+  background: #faf5ea;
+}
+
+.admin-tool-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.admin-link-button {
+  margin-top: 0.2rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #8a6d2f;
+  font-size: 0.8rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.admin-success {
+  margin: 1rem 0 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid #c4e5cf;
+  border-radius: 8px;
+  background: #eef8f1;
+  color: #23703f;
+}
+
+.detail-subrow > td {
+  background: #faf8f2;
+  padding: 0.4rem 1rem 0.8rem;
+}
+
+/* 予約詳細（管理） */
+.detail-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  margin: 1.5rem 0 1rem;
+  padding: 1rem 1.2rem;
+  background: #fff;
+  border: 1px solid #ece7db;
+  border-radius: 12px;
+}
+
+.detail-header-date {
+  font-size: 1.3rem;
+  font-weight: bold;
+  color: #3a2e1f;
+}
+
+.detail-header-sub {
+  margin-top: 0.2rem;
+  color: #6b604a;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.detail-card {
+  margin-bottom: 0;
+  padding-bottom: 1rem;
+}
+
+.detail-list {
+  margin: 0;
+}
+
+.detail-row {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr;
+  gap: 0.6rem;
+  padding: 0.4rem 0.4rem;
+  border-top: 1px solid #f1ece0;
+}
+
+.detail-row dt {
+  color: #8a8270;
+  font-size: 0.88rem;
+}
+
+.detail-row dd {
+  margin: 0;
+  color: #3a2e1f;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.detail-note {
+  margin: 0.5rem 0 1rem;
+  font-size: 0.88rem;
+  line-height: 1.7;
+  color: #6b604a;
+}
+
+.detail-danger {
+  margin-top: 1.5rem;
+  border-color: #f2c7c7;
+  padding: 1.2rem;
+}
+
+.detail-label {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-size: 0.9rem;
+  color: #4a3f2a;
+}
+
+.detail-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #d8d2c4;
+  border-radius: 8px;
+  font: inherit;
+}
+
+.detail-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+  font-size: 0.9rem;
+  color: #4a3f2a;
+}
+
+.detail-danger-button {
+  margin-top: 1rem;
+  padding: 0.6rem 1.2rem;
+  border: none;
+  border-radius: 8px;
+  background: #b3261e;
+  color: #fff;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.detail-danger-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (max-width: 600px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-row {
+    grid-template-columns: 6rem 1fr;
+  }
+}
+
 /* グラフの軸・凡例の文字サイズ（Recharts の SVG テキスト） */
 .admin-chart-card .recharts-text {
   font-size: 12px;

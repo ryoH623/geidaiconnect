@@ -1,9 +1,17 @@
 // src/pages/admin/AdminReservations.tsx
 // 管理者用: 全予約の一覧（閲覧のみ）。今後／過去／キャンセル等で切り替え、名前で絞り込める。
 import React, { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { db } from "../../firebase";
 import { collection, getDocs } from "firebase/firestore";
+import {
+  CANCELLED_BY_LABELS,
+  PAYMENT_STATUS,
+  RESERVATION_STATUS,
+  StatusBadge as Badge,
+  formatLessonDate as formatDate,
+  todayJst,
+} from "../../lib/adminReservationLabels";
 
 interface Reservation {
   id: string;
@@ -30,52 +38,6 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "all", label: "すべて" },
 ];
 
-// [表示名, バッジの色]
-const PAYMENT_STATUS: Record<string, [string, string]> = {
-  pending_payment: ["決済待ち", "gray"],
-  authorized: ["カード確保済み", "blue"],
-  paid: ["支払済み", "green"],
-  refunded: ["返金済み", "gray"],
-  voided: ["与信取消", "gray"],
-  refund_failed: ["返金失敗・要対応", "red"],
-  payment_failed: ["決済失敗", "red"],
-  expired: ["期限切れ", "gray"],
-};
-
-const RESERVATION_STATUS: Record<string, [string, string]> = {
-  pending: ["確定待ち", "amber"],
-  confirmed: ["確定", "green"],
-  cancelled: ["キャンセル", "red"],
-  expired: ["期限切れ", "gray"],
-};
-
-const CANCELLED_BY_LABELS: Record<string, string> = {
-  student: "生徒都合",
-  teacher: "講師都合",
-  operator: "運営による取消",
-};
-
-const WEEKDAYS =["日", "月", "火", "水", "木", "金", "土"];
-
-function formatDate(date: string): string {
-  const m = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return date || "―";
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  return `${m[1]}/${Number(m[2])}/${Number(m[3])}（${WEEKDAYS[d.getDay()]}）`;
-}
-
-function todayJst(): string {
-  return new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
-}
-
-const Badge: React.FC<{ map: Record<string, [string, string]>; value: string }> = ({
-  map,
-  value,
-}) => {
-  const [label, color] = map[value] || [value || "不明", "gray"];
-  return <span className={`status-badge status-badge--${color}`}>{label}</span>;
-};
-
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 
 const AdminReservations: React.FC = () => {
@@ -84,6 +46,7 @@ const AdminReservations: React.FC = () => {
   const [error, setError] = useState("");
   const [tab, setTab] = useState<Tab>("upcoming");
   const [keyword, setKeyword] = useState("");
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -216,9 +179,20 @@ const AdminReservations: React.FC = () => {
                 </thead>
                 <tbody>
                   {rows.map((r) => (
-                    <tr key={r.id}>
+                    <tr
+                      key={r.id}
+                      className="is-clickable"
+                      onClick={() => navigate(`/admin/reservations/${r.id}`)}
+                    >
                       <td>
-                        <div className="cell-main">{formatDate(r.lessonDate)}</div>
+                        <div className="cell-main">
+                          <Link
+                            to={`/admin/reservations/${r.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {formatDate(r.lessonDate)}
+                          </Link>
+                        </div>
                         <div className="cell-sub">
                           {r.lessonTime || "―"}
                           {r.lessonType && ` ・ ${r.lessonType}`}
@@ -230,7 +204,12 @@ const AdminReservations: React.FC = () => {
                       <td className="cell-wrap">
                         <div className="cell-main">
                           {r.teacherId ? (
-                            <Link to={`/admin/teachers/${r.teacherId}`}>{r.teacherName || "―"}</Link>
+                            <Link
+                              to={`/admin/teachers/${r.teacherId}`}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {r.teacherName || "―"}
+                            </Link>
                           ) : (
                             r.teacherName || "―"
                           )}

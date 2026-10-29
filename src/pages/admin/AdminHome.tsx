@@ -76,6 +76,14 @@ const AdminHome: React.FC = () => {
           </Link>
 
           <Link
+            to="/admin/settlements"
+            className="form-button"
+            style={{ textAlign: "center" }}
+          >
+            月末精算（講師への支払い）
+          </Link>
+
+          <Link
             to="/admin/users"
             className="form-button"
             style={{ textAlign: "center" }}

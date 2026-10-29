@@ -1113,10 +1113,18 @@ export default function ScheduleForm() {
     );
   };
 
+  // 日ごとの個別調整で時間帯を1つも選んでいない日は、まとめ設定をそのまま使う
+  // （「選択日へまとめ設定を反映」を押し忘れても登録できるようにするため）
+  const effectiveSettingOf = (date: string): PerDaySetting => {
+    const setting = perDaySettings[date];
+    if (setting && setting.times.length > 0) return setting;
+    return { times: bulkTimes, lessonMethodMap: bulkLessonMethodMap };
+  };
+
   const previewData = useMemo(() => {
     return selectedDates.map((date) => {
       const setting = perDaySettings[date];
-      if (setting) {
+      if (setting && setting.times.length > 0) {
         return {
           date,
           items: setting.times.map((time) => ({
@@ -1141,7 +1149,7 @@ export default function ScheduleForm() {
   const totalSlotCount = useMemo(() => {
     return selectedDates.reduce((sum, date) => {
       const setting = perDaySettings[date];
-      if (setting) return sum + setting.times.length;
+      if (setting && setting.times.length > 0) return sum + setting.times.length;
       return sum + bulkTimes.length;
     }, 0);
   }, [selectedDates, perDaySettings, bulkTimes]);
@@ -1162,13 +1170,12 @@ export default function ScheduleForm() {
     }
 
     for (const date of selectedDates) {
-      const setting = perDaySettings[date] || {
-        times: bulkTimes,
-        lessonMethodMap: bulkLessonMethodMap,
-      };
+      const setting = effectiveSettingOf(date);
 
       if (setting.times.length === 0) {
-        setErrorMessage(`${date} の時間帯が未設定です。`);
+        setErrorMessage(
+          `${date} の時間帯が未設定です。「2. まとめ設定」か「3. 日ごとの個別調整」で時間帯を選んでください。`
+        );
         return;
       }
 
@@ -1192,10 +1199,7 @@ export default function ScheduleForm() {
       const docsToSave: Array<{ id: string; data: Record<string, unknown> }> = [];
 
       for (const date of selectedDates) {
-        const setting = perDaySettings[date] || {
-          times: bulkTimes,
-          lessonMethodMap: bulkLessonMethodMap,
-        };
+        const setting = effectiveSettingOf(date);
 
         for (const time of setting.times) {
           docsToSave.push({
@@ -1908,7 +1912,14 @@ export default function ScheduleForm() {
                 return (
                   <div key={date} className="schedule-form-perday-card">
                     <div className="schedule-form-perday-header">
-                      <div className="schedule-form-perday-title">{date}</div>
+                      <div className="schedule-form-perday-title">
+                        {date}
+                        {setting.times.length === 0 && (
+                          <span style={{ marginLeft: "0.6rem", fontSize: "0.8rem", fontWeight: "normal", color: "#8a8270" }}>
+                            個別の時間帯なし（まとめ設定で登録します）
+                          </span>
+                        )}
+                      </div>
                       <div className="schedule-form-section-actions">
                         <button
                           type="button"

@@ -11,6 +11,7 @@ import {
   releaseCoupon,
   reserveCouponInTx,
   restoreUsedCoupon,
+  requireAdmin,
   type CancelInitiator,
 } from "./campaigns";
 
@@ -57,7 +58,6 @@ export {
 // ========================================
 // Environment variables
 // ========================================
-const APP_URL = defineString("APP_URL");
 
 // メール送信の共通基盤は mailer.ts にある（teacherInvites.ts からも使うため）
 import {
@@ -69,6 +69,7 @@ import {
   escapeHtml,
   sendMailSafe,
   buildInfoMailHtml,
+  APP_URL,
 } from "./mailer";
 
 // お問い合わせフォームの通知先（運営宛）
@@ -2371,6 +2372,7 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
                 paymentProvider: "stripe",
                 stripeSessionId: session.id,
                 stripePaymentIntentId,
+                stripeLivemode: event.livemode,
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
               }
             : {
@@ -2379,6 +2381,7 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
                 paymentProvider: "stripe",
                 stripeSessionId: session.id,
                 stripePaymentIntentId,
+                stripeLivemode: event.livemode,
                 paidAt: admin.firestore.FieldValue.serverTimestamp(),
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
               },
@@ -3181,6 +3184,76 @@ export const cancelReservation = https.onCall(
 /** balance_transaction が取れなかったときの決済手数料の見積もり（国内カード 3.6%） */
 const STRIPE_FEE_RATE_FALLBACK = 0.036;
 
+type RefundResult = {
+  refundOutcome: "voided" | "refunded" | "failed";
+  refundId: string | null;
+  /** 返金しても戻らない Stripe の決済手数料（請求前の取消なら 0） */
+  stripeFee: number;
+  stripeFeeEstimated: boolean;
+};
+
+/**
+ * 予約の決済を生徒の負担なしで取り消す（講師都合・運営による取消で共通）。
+ * 予約上は authorized でも、当日0時の capture と競合して既に請求済みの場合があるため、
+ * Stripe の実際の状態を見てから与信取消か全額返金かを選ぶ。失敗しても throw しない。
+ */
+async function voidOrRefundReservation(
+  r: FirebaseFirestore.DocumentData,
+  reservationId: string,
+  logLabel: string
+): Promise<RefundResult> {
+  const paymentIntentId =
+    typeof r.stripePaymentIntentId === "string" ? r.stripePaymentIntentId : "";
+  const charged = typeof r.totalAmount === "number" ? r.totalAmount : 0;
+  const result: RefundResult = {
+    refundOutcome: "failed",
+    refundId: null,
+    stripeFee: 0,
+    stripeFeeEstimated: false,
+  };
+  try {
+    if (!paymentIntentId) throw new Error("stripePaymentIntentId がありません");
+    const stripe = getStripeClient();
+    const pi = await stripe.paymentIntents.retrieve(paymentIntentId, {
+      expand: ["latest_charge.balance_transaction"],
+    });
+
+    if (pi.status === "requires_capture") {
+      await stripe.paymentIntents.cancel(paymentIntentId);
+      result.refundOutcome = "voided";
+    } else if (pi.status === "canceled") {
+      result.refundOutcome = "voided";
+    } else if (pi.status === "succeeded") {
+      const refund = await stripe.refunds.create({ payment_intent: paymentIntentId });
+      result.refundId = refund?.id ?? null;
+      result.refundOutcome = "refunded";
+      const fee = pi.latest_charge?.balance_transaction?.fee;
+      if (typeof fee === "number") {
+        result.stripeFee = fee;
+      } else {
+        result.stripeFee = Math.round(charged * STRIPE_FEE_RATE_FALLBACK);
+        result.stripeFeeEstimated = true;
+      }
+    } else {
+      throw new Error(`想定外の PaymentIntent 状態: ${pi.status}`);
+    }
+  } catch (error) {
+    logger.error(`${logLabel}: 与信取消/返金に失敗（要手動返金）`, {
+      reservationId,
+      paymentIntentId,
+      error,
+    });
+    result.refundOutcome = "failed";
+  }
+
+  // 返金に失敗しても、運営が手動で返金すれば手数料は戻らないので見積もりで記録しておく
+  if (result.refundOutcome === "failed" && r.paymentStatus === "paid") {
+    result.stripeFee = Math.round(charged * STRIPE_FEE_RATE_FALLBACK);
+    result.stripeFeeEstimated = true;
+  }
+  return result;
+}
+
 export const teacherCancelReservation = https.onCall(
   async (
     data: { reservationId?: string; reason?: string },
@@ -3241,9 +3314,6 @@ export const teacherCancelReservation = https.onCall(
       );
     }
 
-    const paymentIntentId =
-      typeof r.stripePaymentIntentId === "string" ? r.stripePaymentIntentId : "";
-
     logger.info("teacherCancelReservation start", {
       reservationId,
       uid: context.auth.uid,
@@ -3252,54 +3322,10 @@ export const teacherCancelReservation = https.onCall(
       paymentStatus: r.paymentStatus,
     });
 
-    // Stripe の状態を見てから処理を選ぶ。予約上は authorized でも、
-    // 当日0時の capture と競合して既に請求済みになっている場合があるため。
     // ここが失敗しても予約自体はキャンセルする（講師は来られない）。返金は運営が手動で行う。
     const charged = typeof r.totalAmount === "number" ? r.totalAmount : 0;
-    let refundOutcome: "voided" | "refunded" | "failed" = "failed";
-    let refundId: string | null = null;
-    let stripeFee = 0;
-    let stripeFeeEstimated = false;
-    try {
-      if (!paymentIntentId) throw new Error("stripePaymentIntentId がありません");
-      const stripe = getStripeClient();
-      const pi = await stripe.paymentIntents.retrieve(paymentIntentId, {
-        expand: ["latest_charge.balance_transaction"],
-      });
-
-      if (pi.status === "requires_capture") {
-        await stripe.paymentIntents.cancel(paymentIntentId);
-        refundOutcome = "voided";
-      } else if (pi.status === "canceled") {
-        refundOutcome = "voided";
-      } else if (pi.status === "succeeded") {
-        const refund = await stripe.refunds.create({ payment_intent: paymentIntentId });
-        refundId = refund?.id ?? null;
-        refundOutcome = "refunded";
-        const fee = pi.latest_charge?.balance_transaction?.fee;
-        if (typeof fee === "number") {
-          stripeFee = fee;
-        } else {
-          stripeFee = Math.round(charged * STRIPE_FEE_RATE_FALLBACK);
-          stripeFeeEstimated = true;
-        }
-      } else {
-        throw new Error(`想定外の PaymentIntent 状態: ${pi.status}`);
-      }
-    } catch (error) {
-      logger.error("teacherCancelReservation: 与信取消/返金に失敗（要手動返金）", {
-        reservationId,
-        paymentIntentId,
-        error,
-      });
-      refundOutcome = "failed";
-    }
-
-    // 返金に失敗しても、運営が手動で返金すれば手数料は戻らないので見積もりで記録しておく
-    if (refundOutcome === "failed" && r.paymentStatus === "paid") {
-      stripeFee = Math.round(charged * STRIPE_FEE_RATE_FALLBACK);
-      stripeFeeEstimated = true;
-    }
+    const { refundOutcome, refundId, stripeFee, stripeFeeEstimated } =
+      await voidOrRefundReservation(r, reservationId, "teacherCancelReservation");
 
     try {
       const scheduleDocId = typeof r.scheduleDocId === "string" ? r.scheduleDocId : "";
@@ -3497,6 +3523,231 @@ export const teacherCancelReservation = https.onCall(
           : refundOutcome === "refunded"
             ? `予約をキャンセルし、生徒へ全額返金しました。決済手数料 ${stripeFee.toLocaleString("ja-JP")}円 は次回のお支払いから差し引きます。`
             : "予約をキャンセルしました。生徒への返金は運営が手続きします。",
+    };
+  }
+);
+
+// ========================================
+// Callable: 運営による予約の取り消し（管理画面の予約詳細から）
+// 生徒の負担はゼロ（与信取消または全額返金）、クーポンは戻す。
+// 講師都合と違い、返金で戻らない決済手数料は運営の負担とする（teacherCancellations には記録しない）。
+// レッスン開始後でも取り消せる（当日のトラブル対応のため）。
+// ========================================
+export const adminCancelReservation = https.onCall(
+  async (
+    data: { reservationId?: string; reason?: string; reopenSlot?: boolean },
+    context
+  ): Promise<{ ok: boolean; message: string; refundOutcome: string }> => {
+    const adminUid = await requireAdmin(context);
+
+    const reservationId =
+      typeof data?.reservationId === "string" ? data.reservationId.trim() : "";
+    const reason =
+      typeof data?.reason === "string" ? data.reason.trim().slice(0, 500) : "";
+    const reopenSlot = data?.reopenSlot === true;
+
+    if (!reservationId) {
+      throw new https.HttpsError("invalid-argument", "予約IDが指定されていません。");
+    }
+    if (!reason) {
+      throw new https.HttpsError("invalid-argument", "取り消しの理由を入力してください。");
+    }
+
+    const db = admin.firestore();
+    const reservationRef = db.collection("reservations").doc(reservationId);
+    const snap = await reservationRef.get();
+    if (!snap.exists) {
+      throw new https.HttpsError("not-found", "予約が見つかりませんでした。");
+    }
+    const r = snap.data() || {};
+
+    if (
+      r.reservationStatus !== "confirmed" ||
+      !["paid", "authorized"].includes(r.paymentStatus)
+    ) {
+      throw new https.HttpsError(
+        "failed-precondition",
+        "この予約は取り消せません（未決済・キャンセル済み・期限切れのいずれか）。"
+      );
+    }
+
+    logger.info("adminCancelReservation start", {
+      reservationId,
+      adminUid,
+      paymentStatus: r.paymentStatus,
+      reopenSlot,
+    });
+
+    const { refundOutcome, refundId, stripeFee, stripeFeeEstimated } =
+      await voidOrRefundReservation(r, reservationId, "adminCancelReservation");
+
+    // 枠を空け直すのは、まだ始まっていないレッスンで運営が希望した場合だけ
+    const lessonDate = typeof r.lessonDate === "string" ? r.lessonDate : "";
+    const lessonTime = typeof r.lessonTime === "string" ? r.lessonTime : "00:00";
+    const startMs = Date.parse(`${lessonDate}T${lessonTime}:00+09:00`);
+    const canReopen = reopenSlot && Number.isFinite(startMs) && startMs > Date.now();
+
+    try {
+      const scheduleDocId = typeof r.scheduleDocId === "string" ? r.scheduleDocId : "";
+      const studioBookingDocId =
+        typeof r.studioBookingDocId === "string" ? r.studioBookingDocId : "";
+
+      await db.runTransaction(async (tx) => {
+        const scheduleRef = scheduleDocId
+          ? db.collection("schedules").doc(scheduleDocId)
+          : null;
+        const studioBookingRef = studioBookingDocId
+          ? db.collection("studioBookings").doc(studioBookingDocId)
+          : null;
+        const scheduleSnap = scheduleRef ? await tx.get(scheduleRef) : null;
+        const studioSnap = studioBookingRef ? await tx.get(studioBookingRef) : null;
+
+        const cancelledBy: CancelInitiator = "operator";
+        tx.set(
+          reservationRef,
+          {
+            reservationStatus: "cancelled",
+            paymentStatus: refundOutcome === "failed" ? "refund_failed" : refundOutcome,
+            refundId,
+            cancelledBy,
+            cancelReason: reason,
+            cancelledByAdminUid: adminUid,
+            // 運営負担になる決済手数料（集計用）
+            operatorStripeFee: stripeFee,
+            operatorStripeFeeEstimated: stripeFeeEstimated,
+            cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+
+        if (
+          scheduleRef &&
+          scheduleSnap?.exists &&
+          (scheduleSnap.data() || {}).reservationId === reservationId
+        ) {
+          tx.set(
+            scheduleRef,
+            {
+              status: canReopen ? "open" : "closed",
+              isAvailable: canReopen,
+              reservationId: admin.firestore.FieldValue.delete(),
+              reservedAt: admin.firestore.FieldValue.delete(),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+        }
+
+        if (
+          studioBookingRef &&
+          studioSnap?.exists &&
+          (studioSnap.data() || {}).reservationId === reservationId
+        ) {
+          tx.set(
+            studioBookingRef,
+            {
+              status: "open",
+              isAvailable: true,
+              reservationId: admin.firestore.FieldValue.delete(),
+              reservedAt: admin.firestore.FieldValue.delete(),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+        }
+      });
+    } catch (error) {
+      logger.error(
+        "adminCancelReservation: Stripe 処理後の Firestore 更新に失敗（要手動対応）",
+        { reservationId, refundOutcome, refundId, error }
+      );
+      throw new https.HttpsError(
+        "internal",
+        `Stripe の処理（${refundOutcome}）の後で予約の更新に失敗しました。ログを確認してください。`
+      );
+    }
+
+    const usedCouponId = typeof r.couponId === "string" ? r.couponId : "";
+    if (usedCouponId) {
+      if (COUPON_ON_CANCEL.operator === "restore") {
+        await restoreUsedCoupon(usedCouponId, reservationId);
+      } else {
+        await releaseCoupon(usedCouponId, reservationId);
+      }
+    }
+
+    logger.info("adminCancelReservation success", {
+      reservationId,
+      refundOutcome,
+      refundId,
+      stripeFee,
+      couponId: usedCouponId,
+    });
+
+    const moneyLine =
+      refundOutcome === "voided"
+        ? "お支払い前のため、請求は発生しません。"
+        : refundOutcome === "refunded"
+          ? "お支払いいただいた金額は全額返金いたします。返金の反映時期はカード会社等によって異なります。"
+          : "お支払いいただいた金額は全額返金いたします。返金の手続きが完了しましたらご連絡します。";
+
+    const studentEmail = studentEmailOf(r);
+    if (studentEmail) {
+      await sendMailSafe({
+        to: studentEmail,
+        subject: "【Geidai Connect】ご予約を取り消しました",
+        html: buildInfoMailHtml({
+          greetingName: String(r.name || "ご利用者"),
+          intro: [
+            "運営事務局にて、以下のご予約を取り消しました。",
+            moneyLine,
+            ...(usedCouponId
+              ? ["ご利用のクーポンは、再びお使いいただける状態に戻しました。"]
+              : []),
+          ],
+          rows: [...reservationRows(r), ["取り消しの理由", reason]],
+          outro: [
+            "ご不明な点は、このメールへの返信またはお問い合わせフォームからご連絡ください。",
+          ],
+        }),
+      });
+    }
+
+    const teacherId = typeof r.teacherId === "string" ? r.teacherId : "";
+    if (teacherId) {
+      const teacher = await getUserContact(teacherId);
+      if (teacher.email) {
+        await sendMailSafe({
+          to: teacher.email,
+          subject: "【Geidai Connect】運営にて予約を取り消しました",
+          html: buildInfoMailHtml({
+            greetingName: teacher.displayName || String(r.teacherName || "講師"),
+            intro: [
+              "運営事務局にて、以下の予約を取り消しました。生徒への返金は運営が行います。",
+              canReopen
+                ? "該当の時間枠は再び予約できる状態に戻しています。"
+                : "該当の時間枠は閉じています。",
+            ],
+            rows: [
+              ...reservationRows(r),
+              ["生徒氏名", String(r.name ?? "")],
+              ["取り消しの理由", reason],
+            ],
+          }),
+        });
+      }
+    }
+
+    return {
+      ok: true,
+      refundOutcome,
+      message:
+        refundOutcome === "voided"
+          ? "予約を取り消しました（与信取消・請求なし）。"
+          : refundOutcome === "refunded"
+            ? `予約を取り消し、全額返金しました（返金ID: ${refundId ?? ""}）。`
+            : "予約は取り消しましたが、Stripe での返金に失敗しました。Stripe の管理画面から手動で返金してください。",
     };
   }
 );

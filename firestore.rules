@@ -75,8 +75,17 @@ service cloud.firestore {
       allow read: if (isSignedIn() && request.auth.uid == resource.data.teacherId)
         || isAdmin();
       allow update: if isAdmin()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['settled', 'settledAt']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['settled', 'settledAt', 'settlementId']);
       allow create, delete: if false;
+    }
+
+    // 講師への月ごとの支払い（月末精算）の記録。ID は「講師UID_YYYY-MM」。
+    // 運営が管理画面の月末精算で「振込済み」にしたときに作る。講師本人は自分の分を読める。
+    match /teacherSettlements/{settlementId} {
+      allow read: if (isSignedIn() && request.auth.uid == resource.data.teacherId)
+        || isAdmin();
+      allow create, update: if isAdmin();
+      allow delete: if false;
     }
 
     match /reviews/{reviewId} {
