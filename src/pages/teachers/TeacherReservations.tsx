@@ -117,7 +117,14 @@ const TeacherReservations: React.FC = () => {
       setReservations((prev) =>
         prev.map((r) =>
           r.id === res.id
-            ? { ...r, reservationStatus: "cancelled", cancelledBy: "teacher", cancelReason: reason }
+            ? {
+                ...r,
+                reservationStatus: "cancelled",
+                // サーバーと同じ遷移（返金失敗は再読込で反映される）
+                paymentStatus: r.paymentStatus === "paid" ? "refunded" : "voided",
+                cancelledBy: "teacher",
+                cancelReason: reason,
+              }
             : r
         )
       );
