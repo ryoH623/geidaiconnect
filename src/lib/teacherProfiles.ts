@@ -79,6 +79,8 @@ export interface TeacherProfile {
   onlineLessonPrice?: number;
   /** 出張可能な範囲。出張コースがある場合に講師詳細ページで案内する */
   travelRange?: string;
+  /** 自宅コースがある講師の町名（番地は含まない）。予約画面の「講師のご自宅（…）」に使う */
+  homeTown?: string;
   /** サイトに出てよいか。運営の公開操作でのみ true になる */
   published: boolean;
   status: TeacherStatus;
@@ -158,6 +160,7 @@ export function toTeacherProfile(id: string, d: Record<string, unknown>): Teache
     onlineLessonPrice:
       typeof d.onlineLessonPrice === 'number' ? d.onlineLessonPrice : undefined,
     travelRange: typeof d.travelRange === 'string' ? d.travelRange : undefined,
+    homeTown: typeof d.homeTown === 'string' ? d.homeTown : undefined,
     published: d.published === true,
     status: (d.status as TeacherStatus) || 'draft',
   };

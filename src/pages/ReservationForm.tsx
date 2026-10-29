@@ -370,6 +370,19 @@ const ReservationForm: React.FC = () => {
   const isStudioFlow = displayLessonType === 'スタジオ';
   // オンライン予約フローか。会場がないためレッスン場所は「オンライン」で固定する。
   const isOnlineFlow = displayLessonType === 'オンライン';
+  // 自宅レッスンか。会場は講師の自宅なので、生徒には入力させず町名までを表示する。
+  // 番地は予約受付メールで知らせる（functions の sendPaymentCompletedEmails）。
+  const isHomeFlow = displayLessonType === '自宅';
+
+  const homeLocationLabel = useMemo(() => {
+    const teacher =
+      teachers.find((t) => t.authUid === teacherIdFromQuery) ||
+      teachers.find((t) => t.name === teacherNameFromQuery);
+    const area = teacher
+      ? `${teacher.prefecture}${teacher.city}${teacher.homeTown || ''}`
+      : '';
+    return area ? `講師のご自宅（${area}）` : '講師のご自宅';
+  }, [teachers, teacherIdFromQuery, teacherNameFromQuery]);
 
   // 市区町村候補は Geolonia 住所マスタ（全市区町村を網羅）から取得。
   // マスタ取得失敗時は静的リスト（citiesByPrefecture）にフォールバック
@@ -524,7 +537,14 @@ const ReservationForm: React.FC = () => {
   }, [isOnlineFlow]);
 
   useEffect(() => {
-    if (isOnlineFlow) return;
+    if (!isHomeFlow) return;
+    setFormData((prev) =>
+      prev.location === homeLocationLabel ? prev : { ...prev, location: homeLocationLabel }
+    );
+  }, [isHomeFlow, homeLocationLabel]);
+
+  useEffect(() => {
+    if (isOnlineFlow || isHomeFlow) return;
     setFormData((prev) => {
       if (prev.location.trim()) return prev;
       if (!displayLocationHint) return prev;
@@ -536,7 +556,7 @@ const ReservationForm: React.FC = () => {
         location: displayLocationHint,
       };
     });
-  }, [displayLocationHint, isOnlineFlow]);
+  }, [displayLocationHint, isOnlineFlow, isHomeFlow]);
 
   useEffect(() => {
     setFormData((prev) => {
@@ -1613,6 +1633,19 @@ const ReservationForm: React.FC = () => {
                   <p style={{ fontSize: '0.85rem', color: '#666', margin: '0.4rem 0 0' }}>
                     ビデオ通話で行います。参加URLは予約確定後に講師が登録し、
                     マイページと前日のリマインドメールでご案内します。
+                  </p>
+                </>
+              ) : isHomeFlow ? (
+                <>
+                  <input
+                    type="text"
+                    name="location"
+                    value={formData.location}
+                    className="form-control"
+                    disabled
+                  />
+                  <p style={{ fontSize: '0.85rem', color: '#666', margin: '0.4rem 0 0' }}>
+                    番地・建物名までの詳しいご住所は、ご予約後にお送りする予約受付メールでお知らせします。
                   </p>
                 </>
               ) : (

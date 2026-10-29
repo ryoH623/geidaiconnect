@@ -438,7 +438,7 @@ const TeacherProfileForm: React.FC = () => {
                 style={{ ...inputStyle, background: "#f7f5f0" }}
               />
               <span style={{ fontSize: "0.8rem", color: "#666" }}>
-                講師ページには都道府県と市区町村までを掲載します。
+                講師ページには都道府県と市区町村までを掲載します。自宅レッスンのコースがある場合は、予約画面に町名まで表示します。
               </span>
             </label>
 
@@ -456,7 +456,7 @@ const TeacherProfileForm: React.FC = () => {
                 {hasHomeCourse
                   ? "自宅レッスンのコースがあるため必須です。"
                   : "自宅レッスンのコースを作る場合は必須です。"}
-                講師ページには掲載されず、自宅レッスンのご予約が確定した生徒にのみ予約確認メールでお知らせします。
+                講師ページには掲載されず、自宅レッスンを予約した生徒にのみ予約受付メールでお知らせします。
               </span>
             </label>
           </div>

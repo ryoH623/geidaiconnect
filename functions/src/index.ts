@@ -293,10 +293,14 @@ async function teacherHomeAddressOf(teacherUid: string): Promise<string> {
 }
 
 /**
- * 決済完了時の通知メール（生徒: 予約確定 / 講師: 新規予約）。
- * Webhook から呼ぶため、失敗しても throw しない。
+ * 予約の通知メール（生徒・講師の両方）。Webhook やスケジュール実行から呼ぶため、失敗しても throw しない。
+ * - accepted: カードの与信が取れた時点（予約受付）。予約した直後に届くのはこちら。
+ * - paid: 請求が確定した時点。カード予約ではレッスン当日0時の capture 時になる。
  */
-async function sendPaymentCompletedEmails(reservationId: string): Promise<void> {
+async function sendPaymentCompletedEmails(
+  reservationId: string,
+  stage: "accepted" | "paid" = "paid"
+): Promise<void> {
   try {
     const snap = await admin
       .firestore()
@@ -347,13 +351,23 @@ async function sendPaymentCompletedEmails(reservationId: string): Promise<void> 
 
       await sendMailSafe({
         to: studentEmail,
-        subject: "【Geidai Connect】ご予約が確定しました",
+        subject:
+          stage === "accepted"
+            ? "【Geidai Connect】ご予約を受け付けました"
+            : "【Geidai Connect】お支払いが確定しました",
         html: buildInfoMailHtml({
           greetingName: String(r.name || "ご利用者"),
-          intro: [
-            "お支払いが完了し、レッスンのご予約が確定しました。",
-            "ご予約内容は以下のとおりです。",
-          ],
+          intro:
+            stage === "accepted"
+              ? [
+                  "レッスンのご予約を受け付けました。",
+                  "現時点ではカードのお支払い枠を確保しただけで、請求は発生していません。レッスン前日23:59を過ぎるとお支払いが確定します（それまでのキャンセルは請求されません）。",
+                  "ご予約内容は以下のとおりです。",
+                ]
+              : [
+                  "レッスンのお支払いが確定しました。",
+                  "ご予約内容は以下のとおりです。",
+                ],
           rows: studentRows,
           outro: [
             "レッスン当日はどうぞよろしくお願いいたします。",
@@ -373,10 +387,19 @@ async function sendPaymentCompletedEmails(reservationId: string): Promise<void> 
       if (teacher.email) {
         await sendMailSafe({
           to: teacher.email,
-          subject: "【Geidai Connect】新しい予約が入りました",
+          subject:
+            stage === "accepted"
+              ? "【Geidai Connect】新しい予約が入りました"
+              : "【Geidai Connect】予約のお支払いが確定しました",
           html: buildInfoMailHtml({
             greetingName: teacher.displayName || String(r.teacherName || "講師"),
-            intro: ["新しいレッスン予約が確定しました（お支払い完了済み）。"],
+            intro:
+              stage === "accepted"
+                ? [
+                    "新しいレッスン予約が入りました。",
+                    "生徒のお支払いはレッスン前日23:59を過ぎた時点で確定します。",
+                  ]
+                : ["以下の予約のお支払いが確定しました。"],
             rows: [
               ...reservationRows(r),
               ["生徒氏名", String(r.name ?? "")],
@@ -2314,7 +2337,7 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
         .collection("reservations")
         .doc(reservationId);
 
-      const isFirstPaid = await admin
+      const firstEmail = await admin
         .firestore()
         .runTransaction(async (tx) => {
         // Stripe のイベント再送でメールが重複しないよう、初回遷移かどうかを判定する。
@@ -2326,8 +2349,13 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
         const isCardAuth = prev.paymentMethod === "card";
         const alreadyFinal =
           prev.paymentStatus === "paid" || prev.paymentStatus === "authorized";
-        // カードは capture 時に送るため、ここで送るのは paymentMethod 未設定の旧予約のみ。
-        const shouldSendPaidEmail = !alreadyFinal && !isCardAuth;
+        // カードはここで「予約受付」メールを送り、請求確定のメールは capture 時に送る。
+        // paymentMethod 未設定の旧予約は、ここで決済確定メールを送る。
+        const emailStage: "accepted" | "paid" | null = alreadyFinal
+          ? null
+          : isCardAuth
+            ? "accepted"
+            : "paid";
 
         const stripePaymentIntentId =
           typeof session.payment_intent === "string"
@@ -2398,7 +2426,7 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
           );
         }
 
-        return shouldSendPaidEmail;
+        return emailStage;
       });
 
       // クーポンの使用確定。Checkout を作っただけでは used にせず、
@@ -2420,12 +2448,12 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
         reservationId,
         sessionId: session.id,
         scheduleDocId,
-        sendPaidEmail: isFirstPaid,
+        emailStage: firstEmail,
       });
 
-      // 決済確定メール（paymentMethod 未設定の旧予約のみ。カードは capture 時に送る）
-      if (isFirstPaid) {
-        await sendPaymentCompletedEmails(reservationId);
+      // カードは予約受付メール、旧予約は決済確定メール。イベント再送時は送らない
+      if (firstEmail) {
+        await sendPaymentCompletedEmails(reservationId, firstEmail);
       }
     }
 

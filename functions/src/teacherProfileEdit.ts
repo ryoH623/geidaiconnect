@@ -10,6 +10,11 @@ import { logger } from "firebase-functions";
 
 const TEACHER_PROFILES = "teacherProfiles";
 
+/** 以前の登録画面では町名欄に「市区町村＋町名」を入れていたため、市区町村を外して町名だけにする */
+function stripCityPrefix(town: string, city: string): string {
+  return city && town.startsWith(city) ? town.slice(city.length) : town;
+}
+
 /**
  * レッスン料の下限。
  *
@@ -223,6 +228,11 @@ export const saveMyTeacherProfile = https.onCall(
         ? str(data?.travelRange, 100)
         : "",
       onlineAvailable,
+      // 自宅レッスンの予約画面で「講師のご自宅（〇〇区〇〇町）」と出すための町名。
+      // 番地は載せない。自宅コースが無い講師は町名を公開する理由がないので空にする
+      homeTown: courses.some((c) => c.type === "自宅")
+        ? stripCityPrefix(str(data?.town, 100), str(data?.city, 50))
+        : "",
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
 
