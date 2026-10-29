@@ -501,6 +501,131 @@ a[href^="mailto"] {
   font-variant-numeric: tabular-nums;
 }
 
+/* 予約一覧（管理）: タブ・検索・表・状態バッジ */
+.admin-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 1.5rem 0 0.5rem;
+  border-bottom: 1px solid #e3dccb;
+}
+
+.admin-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.6rem 0.9rem;
+  border: none;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  color: #8a8270;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.admin-tab.is-active {
+  color: #4a3f2a;
+  font-weight: bold;
+  border-bottom-color: #b89f6b;
+}
+
+.admin-tab-count {
+  min-width: 1.6em;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: #f1ece0;
+  color: #6b604a;
+  font-size: 0.78rem;
+  font-weight: normal;
+  text-align: center;
+}
+
+.admin-search {
+  flex: 1 1 240px;
+  max-width: 360px;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #d8d2c4;
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+.admin-alert {
+  margin: 1rem 0 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid #f0c2c2;
+  border-radius: 8px;
+  background: #fdf1f1;
+  color: #a12626;
+}
+
+.admin-empty {
+  padding: 2.5rem 1rem;
+  text-align: center;
+  color: #8a8270;
+  background: #fff;
+  border: 1px solid #ece7db;
+  border-radius: 12px;
+}
+
+.admin-table-card {
+  overflow-x: auto;
+  background: #fff;
+  border: 1px solid #ece7db;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+}
+
+.admin-table--reservations th {
+  background: #faf7f0;
+  color: #6b604a;
+  font-size: 0.85rem;
+  font-weight: bold;
+}
+
+.admin-table--reservations td {
+  vertical-align: top;
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+
+.admin-table--reservations .cell-wrap {
+  white-space: normal;
+  min-width: 10rem;
+}
+
+.admin-table--reservations .cell-main {
+  color: #3a2e1f;
+}
+
+.admin-table--reservations .cell-sub {
+  margin-top: 0.2rem;
+  font-size: 0.8rem;
+  color: #8a8270;
+}
+
+.status-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.12rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  border: 1px solid transparent;
+}
+
+.status-badge--green { background: #e8f5ec; color: #23703f; border-color: #c4e5cf; }
+.status-badge--blue  { background: #e9f1fb; color: #24589a; border-color: #c6daf2; }
+.status-badge--amber { background: #fdf4e3; color: #8a5a0b; border-color: #f0dcb1; }
+.status-badge--red   { background: #fdeeee; color: #a12626; border-color: #f2c7c7; }
+.status-badge--gray  { background: #f2f0eb; color: #6f6857; border-color: #e1ddd3; }
+
 /* グラフの軸・凡例の文字サイズ（Recharts の SVG テキスト） */
 .admin-chart-card .recharts-text {
   font-size: 12px;
