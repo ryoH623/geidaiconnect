@@ -1,5 +1,6 @@
 // src/pages/teachers/TeacherReservations.tsx
 // 講師用: 自分宛の予約一覧。オンラインレッスンのみ参加URLを登録できる。
+// 講師都合のキャンセルもここから行う（functions の teacherCancelReservation）。
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { httpsCallable } from "firebase/functions";
@@ -31,12 +32,25 @@ interface Reservation {
   notes?: string;
   /** オンラインレッスンの参加URL（未登録なら空） */
   meetingUrl: string;
+  /** 誰がキャンセルしたか（"student" | "teacher" | "operator"） */
+  cancelledBy: string;
+  cancelReason: string;
+}
+
+/** 講師都合キャンセルの記録（teacherCancellations）のうち、画面に出す部分 */
+interface CancellationFee {
+  stripeFee: number;
+  stripeFeeEstimated: boolean;
+  settled: boolean;
 }
 
 const PAYMENT_STATUS_LABELS: Record<string, string> = {
   pending_payment: "決済待ち",
+  authorized: "お支払い前（カード枠確保済み）",
   paid: "支払済み",
+  voided: "キャンセル（請求なし）",
   refunded: "返金済み",
+  refund_failed: "返金手続き中（運営が対応）",
   expired: "期限切れ",
 };
 
@@ -51,6 +65,14 @@ function statusLabel(map: Record<string, string>, value: string): string {
   return map[value] || value || "不明";
 }
 
+/** 講師がキャンセルできる予約か。サーバー側（teacherCancelReservation）の判定と合わせる */
+function canTeacherCancel(r: Reservation): boolean {
+  if (r.reservationStatus !== "confirmed") return false;
+  if (r.paymentStatus !== "paid" && r.paymentStatus !== "authorized") return false;
+  const start = Date.parse(`${r.lessonDate}T${r.lessonTime || "00:00"}:00+09:00`);
+  return Number.isFinite(start) && start > Date.now();
+}
+
 const TeacherReservations: React.FC = () => {
   const { user } = useAuth();
   const [reservations, setReservations] = useState<Reservation[]>([]);
@@ -60,6 +82,61 @@ const TeacherReservations: React.FC = () => {
   const [urlDrafts, setUrlDrafts] = useState<Record<string, string>>({});
   const [savingUrlId, setSavingUrlId] = useState<string | null>(null);
   const [urlMessage, setUrlMessage] = useState<Record<string, string>>({});
+  // 講師都合キャンセル: 理由の入力欄を開いている予約と、その入力値
+  const [cancelOpenId, setCancelOpenId] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [cancelMessage, setCancelMessage] = useState<Record<string, string>>({});
+  const [fees, setFees] = useState<Map<string, CancellationFee>>(new Map());
+
+  const handleTeacherCancel = async (res: Reservation) => {
+    const reason = cancelReason.trim();
+    if (!reason) {
+      setCancelMessage((prev) => ({ ...prev, [res.id]: "キャンセルの理由を入力してください。" }));
+      return;
+    }
+    if (
+      !window.confirm(
+        `以下の予約を講師都合でキャンセルします。よろしいですか？\n\n` +
+          `${res.name} 様 / ${res.lessonCourse}\n${res.lessonDate} ${res.lessonTime}\n\n` +
+          `生徒には理由を添えてメールでお知らせします。この操作は取り消せません。`
+      )
+    ) {
+      return;
+    }
+
+    setCancellingId(res.id);
+    setCancelMessage((prev) => ({ ...prev, [res.id]: "" }));
+    try {
+      const callable = httpsCallable<
+        { reservationId: string; reason: string },
+        { ok: boolean; message: string }
+      >(functions, "teacherCancelReservation");
+      const result = await callable({ reservationId: res.id, reason });
+
+      setReservations((prev) =>
+        prev.map((r) =>
+          r.id === res.id
+            ? { ...r, reservationStatus: "cancelled", cancelledBy: "teacher", cancelReason: reason }
+            : r
+        )
+      );
+      setCancelOpenId(null);
+      setCancelReason("");
+      setCancelMessage((prev) => ({
+        ...prev,
+        [res.id]: result.data?.message || "予約をキャンセルしました。",
+      }));
+    } catch (err: any) {
+      console.error("講師都合キャンセルに失敗:", err);
+      setCancelMessage((prev) => ({
+        ...prev,
+        [res.id]: err?.message || "キャンセルに失敗しました。時間をおいて再度お試しください。",
+      }));
+    } finally {
+      setCancellingId(null);
+    }
+  };
 
   const handleSaveMeetingUrl = async (reservationId: string) => {
     const value = (urlDrafts[reservationId] ?? "").trim();
@@ -109,10 +186,27 @@ const TeacherReservations: React.FC = () => {
           collection(db, "reservationPayouts"),
           where("teacherId", "==", user.uid)
         );
-        const [querySnapshot, payoutSnapshot] = await Promise.all([
+        // 講師都合キャンセルで差し引く決済手数料
+        const cancellationQ = query(
+          collection(db, "teacherCancellations"),
+          where("teacherId", "==", user.uid)
+        );
+        const [querySnapshot, payoutSnapshot, cancellationSnapshot] = await Promise.all([
           getDocs(q),
           getDocs(payoutQ),
+          getDocs(cancellationQ),
         ]);
+
+        const feeMap = new Map<string, CancellationFee>();
+        for (const c of cancellationSnapshot.docs) {
+          const v = c.data();
+          feeMap.set(c.id, {
+            stripeFee: typeof v.stripeFee === "number" ? v.stripeFee : 0,
+            stripeFeeEstimated: v.stripeFeeEstimated === true,
+            settled: v.settled === true,
+          });
+        }
+        setFees(feeMap);
 
         const payouts = new Map<string, { rate: number; payout: number }>();
         for (const p of payoutSnapshot.docs) {
@@ -149,6 +243,8 @@ const TeacherReservations: React.FC = () => {
             commissionRate: payouts.get(docSnap.id)?.rate ?? null,
             teacherPayout: payouts.get(docSnap.id)?.payout ?? null,
             notes: typeof d.notes === "string" ? d.notes : "",
+            cancelledBy: typeof d.cancelledBy === "string" ? d.cancelledBy : "",
+            cancelReason: typeof d.cancelReason === "string" ? d.cancelReason : "",
           };
         });
 
@@ -312,7 +408,101 @@ const TeacherReservations: React.FC = () => {
                     {res.notes}
                   </p>
                 )}
+                {res.reservationStatus === "cancelled" && res.cancelledBy === "teacher" && (
+                  <>
+                    <p>
+                      <strong>キャンセル：</strong>
+                      講師都合{res.cancelReason && `（理由：${res.cancelReason}）`}
+                    </p>
+                    {(fees.get(res.id)?.stripeFee ?? 0) > 0 && (
+                      <p>
+                        <strong>差し引く決済手数料：</strong>
+                        {fees.get(res.id)!.stripeFee.toLocaleString()}円
+                        {fees.get(res.id)!.stripeFeeEstimated && "（見積もり）"}
+                        <span style={{ color: "#8a8270", fontSize: "0.85rem" }}>
+                          {fees.get(res.id)!.settled
+                            ? "（精算済み）"
+                            : "（次回のお支払いから差し引きます）"}
+                        </span>
+                      </p>
+                    )}
+                  </>
+                )}
               </div>
+
+              {cancelMessage[res.id] && (
+                <p style={{ fontSize: "0.9rem", margin: "0.5rem 0" }}>{cancelMessage[res.id]}</p>
+              )}
+
+              {canTeacherCancel(res) && (
+                <div style={{ marginTop: 12 }}>
+                  {cancelOpenId !== res.id ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCancelOpenId(res.id);
+                        setCancelReason("");
+                      }}
+                      style={{
+                        border: "none",
+                        background: "none",
+                        color: "#c62828",
+                        cursor: "pointer",
+                        padding: 0,
+                        textDecoration: "underline",
+                      }}
+                    >
+                      この予約を講師都合でキャンセルする
+                    </button>
+                  ) : (
+                    <div
+                      style={{
+                        padding: "0.9rem",
+                        border: "1px solid #e5c4c4",
+                        borderRadius: 8,
+                        background: "#fff8f8",
+                      }}
+                    >
+                      <label htmlFor={`cancel-reason-${res.id}`} style={{ fontWeight: "bold" }}>
+                        キャンセルの理由（生徒へのメールに記載されます）
+                      </label>
+                      <textarea
+                        id={`cancel-reason-${res.id}`}
+                        value={cancelReason}
+                        onChange={(e) => setCancelReason(e.target.value)}
+                        maxLength={500}
+                        rows={3}
+                        placeholder="例）体調不良のため"
+                        style={{ width: "100%", marginTop: 6 }}
+                      />
+                      <p style={{ fontSize: "0.85rem", color: "#666", margin: "0.5rem 0" }}>
+                        生徒への請求は発生せず、お支払い済みの場合は全額返金します。
+                        {res.paymentStatus === "paid"
+                          ? "この予約はお支払いが確定しているため、返金しても戻ってこない決済手数料（約3.6%）を先生のお受け取りから差し引きます。"
+                          : "レッスン当日0時以降（お支払い確定後）のキャンセルは、戻ってこない決済手数料（約3.6%）を先生のお受け取りから差し引きます。"}
+                      </p>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          className="form-button"
+                          onClick={() => handleTeacherCancel(res)}
+                          disabled={cancellingId === res.id}
+                        >
+                          {cancellingId === res.id ? "キャンセル処理中..." : "キャンセルを確定する"}
+                        </button>
+                        <button
+                          type="button"
+                          className="form-button"
+                          onClick={() => setCancelOpenId(null)}
+                          disabled={cancellingId === res.id}
+                        >
+                          やめる
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {res.lessonType === "オンライン" &&
                 res.reservationStatus !== "cancelled" && (

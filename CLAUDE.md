@@ -60,16 +60,23 @@ firebase deploy --only functions   # デプロイ（predeploy で lint と build
 - 退会者のメールアドレスはハッシュで `deletedEmails` に残し、再登録時の紹介特典を止める（[functions/src/deletedEmails.ts](functions/src/deletedEmails.ts)）。
 - 仕様と運用手順は [docs/account-deletion.md](docs/account-deletion.md)。
 
+### 講師都合のキャンセル
+
+- `/teacher/reservations` から講師が理由を入れてキャンセルする（callable `teacherCancelReservation`）。レッスン開始時刻まで可能。
+- 生徒の負担はゼロ。請求前は与信取消、請求後（当日0時の capture 後）は Stripe で全額返金し、クーポンは戻す。枠は再予約されないよう `closed` にする。
+- 返金して戻らない Stripe の決済手数料は講師負担。`teacherCancellations/{予約ID}` に `stripeFee` を記録し、運営が月末精算で差し引いて `/admin/teachers/:id` で「精算済み」にする。
+- Stripe 側の処理に失敗しても予約はキャンセルし、`paymentStatus: "refund_failed"` にして運営へメールする（Stripe の管理画面で手動返金）。
+
 ### Cloud Functions（functions/src/index.ts ＋ campaigns.ts）
 
 - firebase-functions **v1 API**（`firebase-functions/v1`）を使用。リージョンは `us-central1`（フロントの `getFunctions(app, "us-central1")` と一致させること）。
 - 環境変数は `defineString()` パラメータで定義: SMTP_*, APP_URL, STRIPE_SECRET_KEY, STRIPE_SUCCESS_URL, STRIPE_CANCEL_URL, STRIPE_WEBHOOK_SECRET。
-- エクスポート（onCall/onRequest）: `sendVerifyEmail`, `resendVerifyEmail`, `createCheckoutSession`, `getAvailableStudios`, `createReservationAndCheckout`, `getReservationForSuccess`, `stripeWebhook`, `cancelReservation`, `rescheduleReservation`, `setMeetingUrl`, `submitContact`, `submitRequest`, `submitTeacherApplication`, `studioAdminHttp`, `submitReview`, `getMyReferralCode`, `checkReferralCode`, `applyReferralCode`, `adminIssueCoupon`, `adminCancelCoupon`, `adminSetReferralBlocked`, `checkMyAccountDeletion`, `deleteMyAccount`, `adminDeleteUser`, `logSearch`。
+- エクスポート（onCall/onRequest）: `sendVerifyEmail`, `resendVerifyEmail`, `createCheckoutSession`, `getAvailableStudios`, `createReservationAndCheckout`, `getReservationForSuccess`, `stripeWebhook`, `cancelReservation`, `teacherCancelReservation`, `rescheduleReservation`, `setMeetingUrl`, `submitContact`, `submitRequest`, `submitTeacherApplication`, `studioAdminHttp`, `submitReview`, `getMyReferralCode`, `checkReferralCode`, `applyReferralCode`, `adminIssueCoupon`, `adminCancelCoupon`, `adminSetReferralBlocked`, `checkMyAccountDeletion`, `deleteMyAccount`, `adminDeleteUser`, `logSearch`。
 - スケジュール実行（pubsub）: `sendLessonReminders`（レッスン前リマインド）, `releaseExpiredHolds`（期限切れ pending の枠解放）, `captureDueAuthorizations`（締切を過ぎたカード与信のキャプチャ）, `finalizeCompletedLessons`（レッスン完了の確定と紹介特典の判定）, `expireCoupons`（期限切れクーポンの整理）, `purgeOldSearchLogs`（保持期間を過ぎた検索ログの削除）。
 
 ### Firestore
 
-主なコレクション: `users`（本人のみ read/write・削除は Functions のみ）, `reservations`（削除禁止）, `reviews`（作成は Functions のみ）, `schedules`（read は公開）, `coupons`（本人のみ read）, `couponGrants` / `referralCodes`（admin のみ read）, `referrals`（紹介者・被紹介者が read）, `searchLogs`（read は admin のみ・書き込みは Functions のみ）, `accountDeletions` / `deletedEmails`（admin のみ read・書き込みは Functions のみ）。ルールは [firestore.rules](firestore.rules)。
+主なコレクション: `users`（本人のみ read/write・削除は Functions のみ）, `reservations`（削除禁止）, `reviews`（作成は Functions のみ）, `schedules`（read は公開）, `coupons`（本人のみ read）, `couponGrants` / `referralCodes`（admin のみ read）, `referrals`（紹介者・被紹介者が read）, `searchLogs`（read は admin のみ・書き込みは Functions のみ）, `accountDeletions` / `deletedEmails`（admin のみ read・書き込みは Functions のみ）, `teacherCancellations`（講師本人と admin が read・作成は Functions のみ・admin は精算済みの印だけ更新可）。ルールは [firestore.rules](firestore.rules)。
 
 ### フロントエンド構成
 

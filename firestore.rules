@@ -68,6 +68,17 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // 講師都合キャンセルの記録（決済手数料の差し引き額を含む）。
+    // 作成は Functions（teacherCancelReservation）のみ。
+    // 運営は月末精算で差し引いたときに「精算済み」の印だけを付けられる。
+    match /teacherCancellations/{reservationId} {
+      allow read: if (isSignedIn() && request.auth.uid == resource.data.teacherId)
+        || isAdmin();
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['settled', 'settledAt']);
+      allow create, delete: if false;
+    }
+
     match /reviews/{reviewId} {
       allow read: if true;
       // 作成は Cloud Functions（submitReview, Admin SDK でルールをバイパス）経由のみ。
