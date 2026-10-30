@@ -8,46 +8,48 @@ import {
   faGraduationCap,
   faMagnifyingGlassLocation,
   faStar,
-  faHandshake,
-  faLaptop,
-  faChildReaching,
+  faHouseChimney,
   faCalendarCheck,
   faCreditCard,
+  faHandshake,
+  faUserPlus,
+  faChevronRight,
 } from "@fortawesome/free-solid-svg-icons";
 import { tagIconMap } from "./utils/tagIconMap";
 import "./index.css";
 
-// トップページの特徴カード
+// よくある質問の抜粋（全文は /faq）
+const faqItems = [
+  {
+    q: "初心者や子どもでも申し込めますか？",
+    a: "はい。「初心者歓迎」の講師が在籍しています。対象年齢は講師ごとに異なるため、各プロフィールをご確認ください。",
+  },
+  {
+    q: "いつ請求されますか？",
+    a: "ご予約の時点ではカードのお支払い枠を確保するだけです。実際のお支払いはレッスン前日に確定します。",
+  },
+  {
+    q: "東京藝術大学の公式サービスですか？",
+    a: "いいえ。藝大卒業生の有志が運営する民間サービスで、大学および関連団体が運営・公認・提携するものではありません。",
+  },
+];
+
+// トップページの特徴カード（選ぶ理由を3つに絞る）
 const featureItems = [
   {
     icon: faGraduationCap,
-    title: "藝大卒の講師陣",
-    text: "東京藝術大学を卒業したプロフェッショナルによる、高品質なレッスンをお届けします。",
+    title: "藝大卒の講師だけ",
+    text: "講師は全員、東京藝術大学の卒業生。お子さまの習い事から大人の学び直しまで、プロが丁寧に教えます。",
   },
   {
-    icon: faMagnifyingGlassLocation,
-    title: "かんたん検索",
-    text: "お住まいの地域とジャンルを選ぶだけで、あなたにぴったりの講師が見つかります。",
+    icon: faHouseChimney,
+    title: "通いやすい場所で",
+    text: "講師の自宅・スタジオ・ご自宅への出張・オンラインから、通いやすい形を選べます（講師により対応）。",
   },
   {
     icon: faStar,
-    title: "安心のレビュー",
-    text: "実際に受講した方のレビューを参考に、安心して講師を選ぶことができます。",
-  },
-  {
-    icon: faHandshake,
-    title: "依頼マッチング",
-    text: "演奏会への出演や作品の展示など、プロへのご依頼にも幅広く対応しています。",
-  },
-  {
-    icon: faLaptop,
-    title: "オンライン対応",
-    text: "遠方にお住まいの方も、オンラインレッスンで受講いただけます（講師により対応）。",
-  },
-  {
-    icon: faChildReaching,
-    title: "幅広いニーズに対応",
-    text: "お子さまの習い事から大人の本格的な学び直しまで、幅広くお応えします。",
+    title: "レビューで選べる",
+    text: "実際に受講した方のレビューや料金、空き日程を見比べて、納得して講師を選べます。",
   },
 ];
 
@@ -56,17 +58,17 @@ const flowSteps = [
   {
     icon: faMagnifyingGlassLocation,
     title: "講師を探す",
-    text: "講師のプロフィールやレッスンコース、レビューを見て、ぴったりの講師を選びます。",
+    text: "プロフィールやレビュー、料金を見て講師を選びます。",
   },
   {
     icon: faCalendarCheck,
     title: "日時を選んで予約",
-    text: "講師の空き状況カレンダーから、ご希望の日時とコースを選択します。",
+    text: "空き状況カレンダーから日時とコースを選びます。",
   },
   {
     icon: faCreditCard,
     title: "オンライン決済で完了",
-    text: "クレジットカードで安全に決済（Stripe）。予約確定のご案内をメールでお届けします。",
+    text: "カードで決済すると、予約受付のメールが届きます。",
   },
 ];
 
@@ -120,10 +122,10 @@ const HeroArt: React.FC = () => (
     />
 
     {/* 音符のような点 */}
-    <circle cx="420" cy="380" r="5" fill="#e3cd97" opacity="0.9" />
-    <circle cx="640" cy="452" r="4" fill="#d2b87e" opacity="0.75" />
-    <circle cx="900" cy="428" r="5.5" fill="#e3cd97" opacity="0.85" />
-    <circle cx="1180" cy="470" r="3.5" fill="#cdb076" opacity="0.6" />
+    <circle cx="150" cy="560" r="5" fill="#e3cd97" opacity="0.9" />
+    <circle cx="300" cy="610" r="4" fill="#d2b87e" opacity="0.75" />
+    <circle cx="1290" cy="560" r="5.5" fill="#e3cd97" opacity="0.85" />
+    <circle cx="1180" cy="620" r="3.5" fill="#cdb076" opacity="0.6" />
     <circle cx="250" cy="410" r="3.5" fill="#cdb076" opacity="0.6" />
 
     {/* きらめき */}
@@ -201,72 +203,11 @@ const GeidaiConnectUi: React.FC = () => {
         </div>
       </section>
 
-      <div id="about" className="about-section enhanced">
-        <h2>
-          GeidaiConnectとは？<span className="heading-reading">（ゲイダイ・コネクト）</span>
-        </h2>
-        <p className="catch-copy">
-          <span className="nowrap-unit">藝大卒とつながる、</span>
-          <span className="nowrap-unit">芸術への架け橋</span>
-        </p>
-        <p>
-          <BudouxText>
-            東京藝術大学（藝大）で研鑽を積んだプロの芸術家に、直接学び、直接依頼する。GeidaiConnectは、音楽と美術のためのマッチングサービスです。
-          </BudouxText>
-        </p>
-        <p>
-          <BudouxText>
-            習いたい人も、頼みたい人も。藝大卒のプロフェッショナルが、あなたと芸術の世界をつなぎます。
-          </BudouxText>
-        </p>
-      </div>
-
-      <section className="features-section">
-        <h3>
-          GeidaiConnectの<span className="nowrap-unit">主な特徴</span>
-        </h3>
-        <div className="feature-grid">
-          {featureItems.map((item) => (
-            <div key={item.title} className="feature-card">
-              <div className="feature-icon">
-                <FontAwesomeIcon icon={item.icon} />
-              </div>
-              <h4>{item.title}</h4>
-              <p>
-                <BudouxText>{item.text}</BudouxText>
-              </p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="flow-section">
-        <h3>ご利用の流れ</h3>
-        <div className="flow-grid">
-          {flowSteps.map((step, i) => (
-            <div key={step.title} className="flow-card">
-              <span className="flow-step-number">{i + 1}</span>
-              <div className="flow-icon">
-                <FontAwesomeIcon icon={step.icon} />
-              </div>
-              <h4>{step.title}</h4>
-              <p>
-                <BudouxText>{step.text}</BudouxText>
-              </p>
-            </div>
-          ))}
-        </div>
-        <p className="flow-note">
-          キャンセルの取り扱いについては<Link to="/terms">利用規約</Link>を、
-          よくあるご質問は<Link to="/faq">FAQ</Link>をご覧ください。
-        </p>
-      </section>
-
       <section id="search" className="search-section fade-in-up">
         <h3>講師を探す</h3>
-        <p>
+        <p className="top-section-lead">
           <BudouxText>
-            気になる講師のカードを選ぶと、プロフィール・レッスンコースの確認と予約ができます。
+            気になる講師を選ぶと、プロフィール・レッスン内容の確認と予約ができます。
           </BudouxText>
         </p>
         <p className="service-area-note">
@@ -331,13 +272,18 @@ const GeidaiConnectUi: React.FC = () => {
                   to={`/teachers/${teacher.id}`}
                   className="tcard"
                 >
-                  {teacher.photo && (
+                  {teacher.photo ? (
                     <img
                       src={teacher.photo}
                       alt={`${teacher.name}の写真`}
                       className="tcard-photo"
                       loading="lazy"
                     />
+                  ) : (
+                    // 写真が未登録の講師は、名前の頭文字で代わりの画像を出す
+                    <div className="tcard-photo tcard-photo--placeholder" aria-hidden="true">
+                      <span>{teacher.name.slice(0, 1)}</span>
+                    </div>
                   )}
                   <div className="tcard-body">
                     <p className="tcard-genre">{teacher.genres.join("、")}</p>
@@ -381,6 +327,106 @@ const GeidaiConnectUi: React.FC = () => {
             条件に合う講師が見つかりませんでした。絞り込みを変更してお試しください。
           </p>
         )}
+      </section>
+      <section id="about" className="features-section top-about">
+        <h3>
+          GeidaiConnectとは
+          <span className="heading-reading">（ゲイダイ・コネクト）</span>
+        </h3>
+        <p className="top-section-lead">
+          <BudouxText>
+            東京藝術大学で研鑽を積んだプロの芸術家に、直接学び、直接依頼できる、音楽と美術のためのマッチングサービスです。
+          </BudouxText>
+        </p>
+        <div className="feature-grid feature-grid--three">
+          {featureItems.map((item) => (
+            <div key={item.title} className="feature-card">
+              <div className="feature-icon">
+                <FontAwesomeIcon icon={item.icon} />
+              </div>
+              <h4>{item.title}</h4>
+              <p>
+                <BudouxText>{item.text}</BudouxText>
+              </p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="flow-section top-flow">
+        <h3>ご利用の流れ</h3>
+        <div className="flow-grid">
+          {flowSteps.map((step, i) => (
+            <div key={step.title} className="flow-card">
+              <span className="flow-step-number">{i + 1}</span>
+              <div className="flow-icon">
+                <FontAwesomeIcon icon={step.icon} />
+              </div>
+              <h4>{step.title}</h4>
+              <p>
+                <BudouxText>{step.text}</BudouxText>
+              </p>
+            </div>
+          ))}
+        </div>
+        <p className="flow-note">
+          キャンセルの取り扱いについては<Link to="/terms">利用規約</Link>をご覧ください。
+        </p>
+      </section>
+
+      <section className="top-entry-grid" aria-label="ご依頼・講師募集">
+        <Link to="/request" className="top-entry-card">
+          <div className="feature-icon">
+            <FontAwesomeIcon icon={faHandshake} />
+          </div>
+          <div className="top-entry-body">
+            <h3>演奏・制作のご依頼</h3>
+            <p>
+              <BudouxText>
+                演奏会やイベントへの出演、作品の制作・展示など、藝大卒のプロへのご依頼を承ります。
+              </BudouxText>
+            </p>
+            <span className="top-entry-cta">
+              依頼内容を相談する <FontAwesomeIcon icon={faChevronRight} />
+            </span>
+          </div>
+        </Link>
+        <Link to="/recruit" className="top-entry-card">
+          <div className="feature-icon">
+            <FontAwesomeIcon icon={faUserPlus} />
+          </div>
+          <div className="top-entry-body">
+            <h3>講師として登録する</h3>
+            <p>
+              <BudouxText>
+                東京藝術大学の卒業生の方へ。空いた時間にレッスンを開いて、教える場を広げませんか。
+              </BudouxText>
+            </p>
+            <span className="top-entry-cta">
+              講師募集を見る <FontAwesomeIcon icon={faChevronRight} />
+            </span>
+          </div>
+        </Link>
+      </section>
+
+      <section className="features-section top-faq">
+        <h3>よくあるご質問</h3>
+        <dl className="top-faq-list">
+          {faqItems.map((item) => (
+            <div key={item.q} className="top-faq-item">
+              <dt>
+                <span className="top-faq-mark">Q</span>
+                {item.q}
+              </dt>
+              <dd>
+                <BudouxText>{item.a}</BudouxText>
+              </dd>
+            </div>
+          ))}
+        </dl>
+        <p className="flow-note">
+          <Link to="/faq">ほかのご質問を見る</Link>
+        </p>
       </section>
     </div>
   );
