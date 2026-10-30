@@ -1,4 +1,5 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import "../index.css";
 
 const Faq: React.FC = () => {
@@ -67,7 +68,14 @@ const Faq: React.FC = () => {
 
           <h3>🔒 個人情報について</h3>
           <p><strong>Q. 個人情報は安全ですか？</strong><br />
-            A. はい。Geidai Connectではプライバシーポリシーに則り、適切に管理・保護いたします。
+            A. 次の仕組みで、情報が漏れにくい形にしています。<br />
+            ・<strong>カード番号を当サービスは受け取りません。</strong>お支払いは決済サービス Stripe（カード業界の国際的な安全基準 PCI DSS の最高レベルに準拠）の画面で行われ、カード番号は当サービスのサーバーやデータベースを通りません。<br />
+            ・<strong>通信はすべて暗号化</strong>（HTTPS）しています。<br />
+            ・<strong>パスワードは運営者にも見えません。</strong>ログインは Google の認証基盤（Firebase Authentication）で管理しており、パスワードは元に戻せない形で保存されます。<br />
+            ・<strong>見られる人を限定しています。</strong>会員情報はご本人と運営者だけが見られる設定にしており、講師に伝わるのは、その講師を予約した方のお名前と連絡先だけです。<br />
+            ・<strong>集める情報を最小限にしています。</strong>生徒の方のご住所は都道府県・市区町村までで、番地までは出張レッスンを予約するときにレッスン場所としてお聞きするだけです。講師のご自宅の詳しい住所も、予約した生徒にしかお知らせしません。<br />
+            ・<strong>退会すると会員情報を削除します。</strong>法令で保存が必要な予約の記録だけを残します。<br />
+            詳しくは<Link to="/privacy">プライバシーポリシー</Link>をご覧ください。
           </p>
         </div>
       </section>
