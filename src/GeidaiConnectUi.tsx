@@ -196,9 +196,9 @@ const GeidaiConnectUi: React.FC = () => {
             <a href="#search" className="hero-cta">
               講師を探す
             </a>
-            <a href="#about" className="hero-cta hero-cta--ghost">
-              GeidaiConnectとは
-            </a>
+            <Link to="/request" className="hero-cta hero-cta--ghost">
+              演奏・制作を依頼する
+            </Link>
           </div>
         </div>
       </section>
