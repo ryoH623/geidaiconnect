@@ -127,7 +127,7 @@ const AdminSettlements: React.FC = () => {
         const commission =
           p && typeof p.commissionAmount === "number"
             ? p.commissionAmount
-            : Math.floor(lessonAmount * COMMISSION_RATE);
+            : Math.floor((lessonAmount - num(x.areaFee)) * COMMISSION_RATE);
         const payout =
           p && typeof p.teacherPayout === "number" ? p.teacherPayout : lessonAmount - commission;
         ls.push({

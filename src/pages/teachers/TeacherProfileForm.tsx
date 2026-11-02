@@ -816,7 +816,7 @@ const TeacherProfileForm: React.FC = () => {
                 </div>
                 <p style={{ fontSize: "0.85rem", color: "#666", lineHeight: 1.8 }}>
                   出張費のかからない区は 0 円のまま選んでください。
-                  出張費もレッスン料の一部として、手数料の計算に含まれます。
+                  出張費には運営手数料がかからず、全額が講師の取り分になります。
                 </p>
               </>
             )}

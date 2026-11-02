@@ -72,7 +72,8 @@ firebase deploy --only functions   # デプロイ（predeploy で lint と build
 
 - 講師は `/teacher/profile` で「基本のレッスン料＋区ごとの出張費」を設定できる（`teacherProfiles.areaFees`、`{ 区名: 円 }`）。対象は出張とスタジオのレッスンで、出張は生徒が予約フォームで選んだ区、スタジオはスタジオの所在区（`studios.city`、東京都のみ）で決まる。
 - `areaFees` が空なら機能は使っていない扱いで出張費 0 円。1件でもあれば、設定した区だけが対応エリアになる（スタジオ検索からも外れる）。
-- `createReservationAndCheckout` はレッスン料をサーバーで照合する（コース料金＋出張費と一致しなければ拒否）。フロントの金額や URL の price は信用しない。予約には `lessonAmount`（出張費込み・手数料の対象）、`baseLessonAmount`、`area`、`areaFee` を保存する。
+- `createReservationAndCheckout` はレッスン料をサーバーで照合する（コース料金＋出張費と一致しなければ拒否）。フロントの金額や URL の price は信用しない。予約には `lessonAmount`（出張費込み）、`baseLessonAmount`、`area`、`areaFee` を保存する。
+- 出張費は運営手数料の対象外。手数料 = `baseLessonAmount` × 率、講師取り分 = `lessonAmount` − 手数料（`reservationPayouts` にも `areaFee` を残す。運営画面の集計は `commissionBaseOf()` を使う）。
 - 23区の一覧と判定は [functions/src/areaFees.ts](functions/src/areaFees.ts) と [src/lib/teacherProfiles.ts](src/lib/teacherProfiles.ts) の両方にある。片方を変えたらもう片方も揃えること。
 
 ### 月末精算

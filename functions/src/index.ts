@@ -1763,7 +1763,8 @@ export const createReservationAndCheckout = https.onCall(
       const commissionRate = commissionRateFor(priorLessonCount);
       // 手数料は「クーポン値引き前のレッスン料」に対して計算する。
       // クーポンは運営が負担する販促費であり、講師の取り分を減らさない。
-      const commissionAmount = Math.floor(lessonAmount * commissionRate);
+      // 出張費は講師の移動の実費なので手数料の対象外（全額を講師の取り分に入れる）。
+      const commissionAmount = Math.floor(baseLessonAmount * commissionRate);
       const teacherPayout = lessonAmount - commissionAmount;
 
       // クーポン。値引き額と利用可否はトランザクション内で確定する。
@@ -1986,7 +1987,7 @@ export const createReservationAndCheckout = https.onCall(
           teacherName,
           teacherEmail,
           lessonCourse,
-          // lessonAmount は出張費を含むレッスン料。手数料もこれに対して計算する
+          // lessonAmount は出張費を含むレッスン料。手数料は出張費を除いた額に対して計算する
           lessonAmount,
           baseLessonAmount,
           area: area || null,
@@ -2040,6 +2041,8 @@ export const createReservationAndCheckout = https.onCall(
           reservationId,
           teacherId,
           lessonAmount,
+          // 出張費は手数料の対象外。手数料 = (lessonAmount - areaFee) × 率
+          areaFee,
           commissionRate,
           commissionAmount,
           teacherPayout,

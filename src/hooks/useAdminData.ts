@@ -73,6 +73,7 @@ export function useAdminData(): AdminData {
               reservationStatus: str(x.reservationStatus),
               // 逓減制の導入前に作られた予約には無い（null → 従来の固定率で計算）
               commissionRate: rateByReservation.get(d.id) ?? null,
+              areaFee: num(x.areaFee),
             };
           })
         );
