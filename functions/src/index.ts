@@ -3,6 +3,7 @@ import { auth as v1auth, https, logger, pubsub } from "firebase-functions/v1";
 import { defineString } from "firebase-functions/params";
 import type { Response } from "express";
 import { google } from "googleapis";
+import { AREA_FEE_LESSON_TYPES, areaFeeFor, readAreaFees } from "./areaFees";
 
 import {
   COUPON_ON_CANCEL,
@@ -488,6 +489,8 @@ type CreateReservationAndCheckoutData = {
   // 利用するクーポン。値引き額はサーバー側で再計算するため、
   // フロントから割引後の金額を受け取ることはしない。
   couponId?: string;
+  // 出張レッスンの出張先の区（区ごとの出張費を設定している講師のみ）
+  area?: string;
 };
 
 type CreateReservationAndCheckoutResult = {
@@ -649,6 +652,67 @@ async function isStudioFreeExternal(
   }
 }
 
+/** 講師プロフィール（teacherProfiles）を Auth の UID から引く。無ければ null */
+async function loadTeacherProfileByUid(
+  teacherId: string
+): Promise<FirebaseFirestore.DocumentData | null> {
+  const snap = await admin
+    .firestore()
+    .collection("teacherProfiles")
+    .where("authUid", "==", teacherId)
+    .limit(1)
+    .get();
+  return snap.empty ? null : snap.docs[0].data() || null;
+}
+
+/** 自動追加されるオンラインコース（フロントの getCourses と揃えること） */
+const ONLINE_COURSE_TITLE = "オンラインレッスン（60分）";
+const DEFAULT_ONLINE_LESSON_PRICE = 5000;
+
+/**
+ * コース名から、そのコースのレッスン方法と基本料金を求める。
+ * フロントの getCourses（src/lib/teacherProfiles.ts）と同じ規則で、
+ * オンライン対応の講師にはオンラインコースを足して探す。
+ */
+function findTeacherCourse(
+  profile: FirebaseFirestore.DocumentData,
+  title: string
+): { type: string; price: number } | null {
+  const courses = Array.isArray(profile.courses) ? profile.courses : [];
+  const toPrice = (v: unknown): number =>
+    typeof v === "number"
+      ? v
+      : parseInt(String(v ?? "").replace(/[^0-9]/g, ""), 10) || 0;
+
+  const hit = courses.find(
+    (c: Record<string, unknown>) => c && c.title === title
+  ) as Record<string, unknown> | undefined;
+  if (hit) {
+    return { type: String(hit.type || "自宅"), price: toPrice(hit.price) };
+  }
+
+  const hasOnline = courses.some(
+    (c: Record<string, unknown>) => c && c.type === "オンライン"
+  );
+  if (profile.onlineAvailable === true && !hasOnline && title === ONLINE_COURSE_TITLE) {
+    return {
+      type: "オンライン",
+      price:
+        typeof profile.onlineLessonPrice === "number" && profile.onlineLessonPrice > 0
+          ? profile.onlineLessonPrice
+          : DEFAULT_ONLINE_LESSON_PRICE,
+    };
+  }
+  return null;
+}
+
+/** スタジオの所在区。出張費の判定に使うため、東京都のスタジオだけ区名を返す */
+function studioWard(studio: FirebaseFirestore.DocumentData): string {
+  return studio.prefecture === "東京都" && typeof studio.city === "string"
+    ? studio.city
+    : "";
+}
+
 /** 講師の users ドキュメントから拠点・移動可能距離を読む */
 async function loadTeacherTravelBase(
   teacherId: string
@@ -689,6 +753,8 @@ type AvailableStudioItem = {
   distanceKm: number | null;
   /** 生徒が選択した町名からの直線距離(km)。座標未指定時は null */
   studentDistanceKm: number | null;
+  /** スタジオの所在区に対する講師の出張費（区ごとの設定が無い講師は 0） */
+  areaFee: number;
 };
 
 /** 生徒座標として妥当か（有限数かつ日本近辺の範囲内） */
@@ -1230,6 +1296,10 @@ export const getAvailableStudios = https.onCall(
     });
 
     const base = await loadTeacherTravelBase(teacherId);
+    // 区ごとの出張費。設定のある講師は、設定した区のスタジオだけを候補にする
+    const areaFees = readAreaFees(
+      (await loadTeacherProfileByUid(teacherId))?.areaFees
+    );
 
     // 移動バッファ判定: この日の講師の他予約と、候補レッスンの開始・終了時刻
     const durationMin =
@@ -1281,6 +1351,10 @@ export const getAvailableStudios = https.onCall(
       });
       if (!reachable) continue;
 
+      // 1.5) 講師の対応エリア（区ごとの出張費の設定）
+      const areaFee = areaFeeFor(areaFees, studioWard(s));
+      if (areaFee === null) continue;
+
       // 2) 自アプリ内ロック（決定的ドキュメント ID を直読み）
       const bookingDocId = buildStudioBookingDocId(studioId, date, time);
       const bookingSnap = await admin
@@ -1329,6 +1403,7 @@ export const getAvailableStudios = https.onCall(
         distanceKm:
           distanceKm === null ? null : Math.round(distanceKm * 10) / 10,
         studentDistanceKm,
+        areaFee,
       });
     }
 
@@ -1434,6 +1509,7 @@ export const createReservationAndCheckout = https.onCall(
         studentLng,
         studioId = "",
         couponId: couponIdRaw = "",
+        area: areaRaw = "",
       } = data || ({} as CreateReservationAndCheckoutData);
 
       const couponId = typeof couponIdRaw === "string" ? couponIdRaw.trim() : "";
@@ -1498,6 +1574,7 @@ export const createReservationAndCheckout = https.onCall(
       let studioBookingDocId = "";
       let studioLat: number | undefined;
       let studioLng: number | undefined;
+      let studioCity = "";
       if (studioId) {
         const studioSnap = await admin
           .firestore()
@@ -1520,6 +1597,7 @@ export const createReservationAndCheckout = https.onCall(
         studioBookingDocId = buildStudioBookingDocId(studioId, date, time);
         studioLat = typeof studio.lat === "number" ? studio.lat : undefined;
         studioLng = typeof studio.lng === "number" ? studio.lng : undefined;
+        studioCity = studioWard(studio);
 
         // 到達可否の再検証（拠点未設定なら reachable 扱い）
         const base = await loadTeacherTravelBase(teacherId);
@@ -1546,6 +1624,81 @@ export const createReservationAndCheckout = https.onCall(
             "選択したスタジオはこの時間帯に空きがありません。"
           );
         }
+      }
+
+      // レッスン料をサーバー側で照合する。金額は予約ページの URL や画面から届くため、
+      // 講師プロフィールの「コース料金＋区ごとの出張費」と一致しなければ受け付けない。
+      const teacherProfile = await loadTeacherProfileByUid(teacherId);
+      if (!teacherProfile || teacherProfile.published !== true) {
+        throw new https.HttpsError("not-found", "講師が見つかりませんでした。");
+      }
+      const course = findTeacherCourse(teacherProfile, lessonCourse);
+      if (!course) {
+        throw new https.HttpsError(
+          "failed-precondition",
+          "選択したコースが見つかりませんでした。講師ページからやり直してください。"
+        );
+      }
+      if (lessonType && lessonType !== course.type) {
+        throw new https.HttpsError(
+          "invalid-argument",
+          "レッスン方法がコースの内容と一致しません。"
+        );
+      }
+
+      // 区ごとの出張費。出張は生徒が選んだ区、スタジオはスタジオの所在区で決まる。
+      let area = "";
+      let areaFee = 0;
+      const areaFees = readAreaFees(teacherProfile.areaFees);
+      if (
+        AREA_FEE_LESSON_TYPES.includes(course.type) &&
+        Object.keys(areaFees).length > 0
+      ) {
+        area =
+          course.type === "スタジオ"
+            ? studioCity
+            : typeof areaRaw === "string"
+              ? areaRaw.trim()
+              : "";
+        if (!area) {
+          throw new https.HttpsError(
+            "invalid-argument",
+            course.type === "スタジオ"
+              ? "講師の対応エリアのスタジオを選択してください。"
+              : "出張先の区を選択してください。"
+          );
+        }
+        const fee = areaFeeFor(areaFees, area);
+        if (fee === null) {
+          throw new https.HttpsError(
+            "failed-precondition",
+            `${area}は講師の対応エリア外です。`
+          );
+        }
+        // 安い区を選んで別の区へ呼ぶことを防ぐため、住所に区名を含めてもらう
+        if (course.type === "出張" && !location.includes(area)) {
+          throw new https.HttpsError(
+            "invalid-argument",
+            `レッスン場所の住所に「${area}」を含めてください。`
+          );
+        }
+        areaFee = fee;
+      }
+
+      const baseLessonAmount = course.price;
+      if (lessonAmount !== baseLessonAmount + areaFee) {
+        logger.warn("createReservationAndCheckout: 料金が講師の設定と一致しません", {
+          teacherId,
+          lessonCourse,
+          lessonAmount,
+          baseLessonAmount,
+          area,
+          areaFee,
+        });
+        throw new https.HttpsError(
+          "failed-precondition",
+          "料金が変更されています。ページを再読み込みしてから、もう一度お試しください。"
+        );
       }
 
       // 金額の組み立て順:
@@ -1833,7 +1986,11 @@ export const createReservationAndCheckout = https.onCall(
           teacherName,
           teacherEmail,
           lessonCourse,
+          // lessonAmount は出張費を含むレッスン料。手数料もこれに対して計算する
           lessonAmount,
+          baseLessonAmount,
+          area: area || null,
+          areaFee,
           lessonDate: date,
           lessonTime: time,
           scheduleDocId,
@@ -1922,7 +2079,7 @@ export const createReservationAndCheckout = https.onCall(
           quantity: 1,
           price_data: {
             currency: "jpy",
-            unit_amount: lessonAmount,
+            unit_amount: baseLessonAmount,
             product_data: {
               name: "Geidai Connect レッスン予約",
               description: `${teacherName} / ${lessonCourse} / ${date} ${time}`,
@@ -1930,6 +2087,21 @@ export const createReservationAndCheckout = https.onCall(
           },
         },
       ];
+
+      // 区ごとの出張費を 2 明細目として合算
+      if (areaFee > 0) {
+        lineItems.push({
+          quantity: 1,
+          price_data: {
+            currency: "jpy",
+            unit_amount: areaFee,
+            product_data: {
+              name: "出張費",
+              description: `${area} / ${date} ${time}`,
+            },
+          },
+        });
+      }
 
       // スタジオ代を 2 明細目として合算
       if (studioId && studioFee > 0) {

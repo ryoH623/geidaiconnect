@@ -253,6 +253,10 @@ const AdminReservationDetail: React.FC = () => {
           <Rows
             rows={[
               ["レッスン料", num(r.lessonAmount) != null ? yen(num(r.lessonAmount)!) : ""],
+              [
+                "うち出張費",
+                num(r.areaFee) ? `${yen(num(r.areaFee)!)}（${str(r.area)}）` : "",
+              ],
               ["スタジオ代", num(r.studioFee) ? yen(num(r.studioFee)!) : ""],
               [
                 "クーポン",

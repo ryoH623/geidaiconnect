@@ -5,7 +5,7 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import { doc, getDoc } from 'firebase/firestore';
 import BookingCalendar from '../components/booking/BookingCalendar';
 import { useTeachers } from '../hooks/useTeachers';
-import { getCourses } from '../lib/teacherProfiles';
+import { areaFeeFor, getCourses, hasAreaFees } from '../lib/teacherProfiles';
 import { prefectures } from '../data/prefectures';
 import { citiesByPrefecture } from '../data/citiesByPrefecture';
 import type { AvailableStudio } from '../data/studios';
@@ -58,6 +58,8 @@ type CreateReservationAndCheckoutPayload = {
   studioFee?: number;
   // 値引き額はサーバー側で再計算されるため、クーポンのIDだけを送る
   couponId?: string;
+  /** 出張先の区（区ごとの出張費を設定している講師のみ） */
+  area?: string;
 };
 
 type GetAvailableStudiosResult = {
@@ -137,6 +139,8 @@ const ReservationForm: React.FC = () => {
   const [studioResults, setStudioResults] = useState<AvailableStudio[]>([]);
   const [selectedStudio, setSelectedStudio] = useState<AvailableStudio | null>(null);
   const [studioSearchError, setStudioSearchError] = useState('');
+  // 出張先の区。区ごとの出張費を設定している講師の出張レッスンでだけ選ばせる
+  const [travelArea, setTravelArea] = useState('');
 
   // ── 入力内容の下書き（ブラウザバック対策）─────────────────────────
   // 講師詳細へ戻ってから再度この画面に来ても入力し直さずに済むよう、
@@ -314,10 +318,12 @@ const ReservationForm: React.FC = () => {
     return foundCourse;
   }, [teacherIdFromQuery, teacherNameFromQuery, lessonCourse, teachers]);
 
-  const lessonAmount = useMemo(() => {
-    // コースの料金は数値、クエリ由来は文字列。どちらも来るので文字列に寄せて解釈する
+  const baseLessonAmount = useMemo(() => {
+    // コースの料金は数値、クエリ由来は文字列。どちらも来るので文字列に寄せて解釈する。
+    // 講師のコース料金を優先し、URL の price は講師情報が引けないときの予備にする
+    // （実際の請求額はサーバーが講師の設定と照合する）。
     const priceSource = String(
-      priceFromQuery || selectedTeacherCourse?.price || lessonCourse
+      selectedTeacherCourse?.price || priceFromQuery || lessonCourse
     );
     const normalized = priceSource.replace(/,/g, '');
     const match = normalized.match(/(\d{3,6})\s*円?/);
@@ -373,6 +379,41 @@ const ReservationForm: React.FC = () => {
   // 自宅レッスンか。会場は講師の自宅なので、生徒には入力させず町名までを表示する。
   // 番地は予約受付メールで知らせる（functions の sendPaymentCompletedEmails）。
   const isHomeFlow = displayLessonType === '自宅';
+  // 出張レッスンか。会場は生徒が指定する場所
+  const isTravelFlow = displayLessonType === '出張';
+
+  const currentTeacher = useMemo(
+    () =>
+      teachers.find((t) => t.authUid === teacherIdFromQuery) ||
+      teachers.find((t) => t.name === teacherNameFromQuery) ||
+      null,
+    [teachers, teacherIdFromQuery, teacherNameFromQuery]
+  );
+
+  // 区ごとの出張費を設定している講師の出張レッスンは、出張先の区を選ばせる
+  const needsTravelArea =
+    isTravelFlow && !!currentTeacher && hasAreaFees(currentTeacher);
+  const travelAreaOptions = useMemo(
+    () =>
+      currentTeacher?.areaFees
+        ? Object.entries(currentTeacher.areaFees).map(([ward, fee]) => ({ ward, fee }))
+        : [],
+    [currentTeacher]
+  );
+
+  // 出張費。出張は選んだ区、スタジオはスタジオの所在区（サーバーが検索結果に付けて返す）
+  const areaFee = useMemo(() => {
+    if (needsTravelArea && currentTeacher && travelArea) {
+      return areaFeeFor(currentTeacher, travelArea) ?? 0;
+    }
+    if (isStudioFlow && selectedStudio) return selectedStudio.areaFee ?? 0;
+    return 0;
+  }, [needsTravelArea, currentTeacher, travelArea, isStudioFlow, selectedStudio]);
+  const areaFeeLabel = isStudioFlow ? '講師の出張費' : `出張費（${travelArea}）`;
+
+  // レッスン料（出張費込み）。サーバーへ送り、講師の設定と照合される
+  const lessonAmount =
+    baseLessonAmount === null ? null : baseLessonAmount + areaFee;
 
   const homeLocationLabel = useMemo(() => {
     const teacher =
@@ -700,6 +741,23 @@ const ReservationForm: React.FC = () => {
     setErrors((prev) => ({ ...prev, location: '', studio: '' }));
   };
 
+  const handleSelectTravelArea = (ward: string) => {
+    const prevPrefix = travelArea ? `東京都${travelArea}` : '';
+    setTravelArea(ward);
+    setFormData((prev) => {
+      const loc = prev.location.trim();
+      if (!ward) return prev;
+      if (prevPrefix && loc.startsWith(prevPrefix)) {
+        return { ...prev, location: `東京都${ward}${loc.slice(prevPrefix.length)}` };
+      }
+      if (!loc || loc === displayLocationHint) {
+        return { ...prev, location: `東京都${ward}` };
+      }
+      return prev;
+    });
+    setErrors((prev) => ({ ...prev, location: '' }));
+  };
+
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
@@ -770,6 +828,14 @@ const ReservationForm: React.FC = () => {
 
     if (!formData.location.trim()) {
       newErrors.location = 'レッスン場所を入力してください';
+    }
+
+    if (needsTravelArea) {
+      if (!travelArea) {
+        newErrors.location = '出張先の区を選択してください';
+      } else if (!formData.location.includes(travelArea)) {
+        newErrors.location = `レッスン場所の住所に「${travelArea}」を含めてください`;
+      }
     }
 
     if (lessonAmount === null || !Number.isInteger(lessonAmount) || lessonAmount < 50) {
@@ -887,6 +953,7 @@ const ReservationForm: React.FC = () => {
         ...(couponDiscount > 0 && selectedCouponId
           ? { couponId: selectedCouponId }
           : {}),
+        ...(needsTravelArea && travelArea ? { area: travelArea } : {}),
         ...(isStudioFlow && selectedStudio
           ? {
               studioId: selectedStudio.id,
@@ -955,7 +1022,10 @@ const ReservationForm: React.FC = () => {
             <p><strong>レッスンコース：</strong>{lessonCourse}</p>
             {displayLessonType && <p><strong>レッスン種別：</strong>{displayLessonType}</p>}
             <p><strong>日時：</strong>{selectedDate} {selectedTime}</p>
-            <p><strong>レッスン料：</strong>{lessonAmount?.toLocaleString()}円</p>
+            <p><strong>レッスン料：</strong>{baseLessonAmount?.toLocaleString()}円</p>
+            {areaFee > 0 && (
+              <p><strong>{areaFeeLabel}：</strong>{areaFee.toLocaleString()}円</p>
+            )}
             {isStudioFlow && selectedStudio && (
               <>
                 <p><strong>スタジオ：</strong>{selectedStudio.name}</p>
@@ -1120,6 +1190,17 @@ const ReservationForm: React.FC = () => {
                 className="form-control"
                 disabled
               />
+              {areaFee > 0 && (
+                <p style={{ margin: '6px 0 0', fontSize: '0.9rem' }}>
+                  レッスン料 {baseLessonAmount?.toLocaleString()}円 ＋ {areaFeeLabel}{' '}
+                  {areaFee.toLocaleString()}円
+                </p>
+              )}
+              {needsTravelArea && !travelArea && (
+                <p style={{ margin: '6px 0 0', fontSize: '0.85rem', color: '#666' }}>
+                  出張先の区によって出張費がかかります。下の「レッスン場所」で区を選んでください。
+                </p>
+              )}
               {isStudioFlow && selectedStudio && (
                 <div style={{ marginTop: 8, fontSize: '0.9rem' }}>
                   <p style={{ margin: '2px 0' }}>
@@ -1562,6 +1643,11 @@ const ReservationForm: React.FC = () => {
                             </span>
                           )}
                           <span>スタジオ代: {s.pricePerSlot.toLocaleString()}円</span>
+                          {(s.areaFee ?? 0) > 0 && (
+                            <span>
+                              {' '}／ 講師の出張費: {(s.areaFee ?? 0).toLocaleString()}円
+                            </span>
+                          )}
                         </span>
                       </label>
                     ))}
@@ -1649,13 +1735,36 @@ const ReservationForm: React.FC = () => {
                   </p>
                 </>
               ) : (
-                <input
-                  type="text"
-                  name="location"
-                  value={formData.location}
-                  onChange={handleChange}
-                  className="form-control"
-                />
+                <>
+                  {needsTravelArea && (
+                    <select
+                      className="form-control"
+                      value={travelArea}
+                      onChange={(e) => handleSelectTravelArea(e.target.value)}
+                      style={{ marginBottom: 8 }}
+                    >
+                      <option value="">出張先の区を選択してください</option>
+                      {travelAreaOptions.map(({ ward, fee }) => (
+                        <option key={ward} value={ward}>
+                          {ward}（出張費 {fee > 0 ? `${fee.toLocaleString()}円` : 'なし'}）
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <input
+                    type="text"
+                    name="location"
+                    value={formData.location}
+                    onChange={handleChange}
+                    className="form-control"
+                  />
+                  {needsTravelArea && (
+                    <p style={{ fontSize: '0.85rem', color: '#666', margin: '0.4rem 0 0' }}>
+                      この講師が出張できるのは、上の一覧にある区だけです。
+                      番地・建物名までご入力ください。
+                    </p>
+                  )}
+                </>
               )}
               {errors.location && <p className="error">{errors.location}</p>}
             </div>

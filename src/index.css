@@ -5334,3 +5334,54 @@ body {
     margin-top: -1.5rem;
   }
 }
+
+/* 講師プロフィール編集：区ごとの出張費 */
+.area-fee-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px 16px;
+}
+.area-fee-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: #999;
+}
+.area-fee-row.is-on {
+  background: #faf6ec;
+  color: inherit;
+}
+.area-fee-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.area-fee-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.area-fee-input input {
+  width: 6.5em;
+  padding: 4px 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  text-align: right;
+}
+
+/* 講師詳細：区ごとの出張費の一覧 */
+.area-fee-note summary {
+  cursor: pointer;
+}
+.area-fee-note ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 2px 12px;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}

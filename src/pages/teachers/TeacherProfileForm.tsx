@@ -14,7 +14,10 @@ import { doc, getDoc } from "firebase/firestore";
 import { db, functions } from "../../firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import {
+  AREA_FEE_LESSON_TYPES,
+  MAX_AREA_FEE,
   MIN_LESSON_PRICE,
+  TOKYO_WARDS,
   TRAVEL_RANGES,
   fetchMyTeacherProfile,
   formatPrice,
@@ -122,6 +125,9 @@ const TeacherProfileForm: React.FC = () => {
   const [onlineAvailable, setOnlineAvailable] = useState(false);
   const [onlinePrice, setOnlinePrice] = useState("");
   const [travelRange, setTravelRange] = useState("");
+  // 区ごとの出張費（東京23区）。入力中は文字列で持ち、対応しない区はキーごと消す
+  const [areaFeeEnabled, setAreaFeeEnabled] = useState(false);
+  const [areaFees, setAreaFees] = useState<Record<string, string>>({});
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -168,6 +174,12 @@ const TeacherProfileForm: React.FC = () => {
         setOnlineAvailable(p.onlineAvailable === true);
         setOnlinePrice(p.onlineLessonPrice ? String(p.onlineLessonPrice) : "");
         setTravelRange(p.travelRange || "");
+        setAreaFeeEnabled(!!p.areaFees && Object.keys(p.areaFees).length > 0);
+        setAreaFees(
+          Object.fromEntries(
+            Object.entries(p.areaFees || {}).map(([ward, fee]) => [ward, String(fee)])
+          )
+        );
       } catch (err) {
         console.error("プロフィールの取得に失敗しました", err);
         if (!cancelled) setLoadError("プロフィールの取得に失敗しました。");
@@ -214,6 +226,10 @@ const TeacherProfileForm: React.FC = () => {
 
   // 出張コースがある場合だけ、出張可能な範囲を聞く
   const hasTravelCourse = courses.some((c) => c.type === "出張");
+  // 出張・スタジオのコースがある場合だけ、区ごとの出張費を設定できる
+  const hasAreaFeeCourse = courses.some((c) =>
+    AREA_FEE_LESSON_TYPES.includes(c.type)
+  );
   // 自宅コースがある場合だけ、会場になる自宅の番地までを必須にする
   const hasHomeCourse = courses.some((c) => c.type === "自宅");
 
@@ -223,6 +239,23 @@ const TeacherProfileForm: React.FC = () => {
   const updateCourse = (index: number, patch: Partial<CourseDraft>) => {
     setCourses((prev) =>
       prev.map((c, i) => (i === index ? { ...c, ...patch } : c))
+    );
+  };
+
+  const toggleWard = (ward: string) => {
+    setAreaFees((prev) => {
+      const next = { ...prev };
+      if (ward in next) delete next[ward];
+      else next[ward] = "0";
+      return next;
+    });
+  };
+
+  const setAllWards = (on: boolean) => {
+    setAreaFees((prev) =>
+      on
+        ? Object.fromEntries(TOKYO_WARDS.map((w) => [w, prev[w] ?? "0"]))
+        : {}
     );
   };
 
@@ -252,6 +285,23 @@ const TeacherProfileForm: React.FC = () => {
 
     if (submit && courses.length === 0) {
       return "公開申請にはコースが1件以上必要です。";
+    }
+    if (hasAreaFeeCourse && areaFeeEnabled) {
+      const wards = Object.keys(areaFees);
+      if (wards.length === 0) {
+        return "区ごとの出張費: 対応する区を1つ以上選んでください。";
+      }
+      for (const ward of wards) {
+        const fee = Number(areaFees[ward]);
+        if (
+          areaFees[ward].trim() === "" ||
+          !Number.isInteger(fee) ||
+          fee < 0 ||
+          fee > MAX_AREA_FEE
+        ) {
+          return `区ごとの出張費: ${ward}は0円以上${formatPrice(MAX_AREA_FEE)}以下で入力してください。`;
+        }
+      }
     }
     if (submit && hasTravelCourse && !travelRange) {
       return "出張レッスンのコースがあるため、出張可能な範囲を選択してください。";
@@ -309,6 +359,13 @@ const TeacherProfileForm: React.FC = () => {
           isTrial: c.isTrial,
         })),
         travelRange: hasTravelCourse ? travelRange : "",
+        // 使わない場合は空で送る（サーバー側で丸ごと置き換える）
+        areaFees:
+          hasAreaFeeCourse && areaFeeEnabled
+            ? Object.fromEntries(
+                Object.entries(areaFees).map(([ward, fee]) => [ward, Number(fee)])
+              )
+            : {},
         onlineAvailable,
         ...(onlineAvailable && onlinePrice.trim()
           ? { onlineLessonPrice: Number(onlinePrice) }
@@ -681,6 +738,88 @@ const TeacherProfileForm: React.FC = () => {
                 </option>
               ))}
             </select>
+          </section>
+        )}
+
+        {/* 区ごとの出張費。出張・スタジオのコースがあるときだけ聞く */}
+        {hasAreaFeeCourse && (
+          <section style={{ marginTop: "2rem" }}>
+            <h3>区ごとの出張費（東京23区）</h3>
+            <p style={{ fontSize: "0.85rem", color: "#666", lineHeight: 1.8 }}>
+              出張・スタジオのレッスンは、場所の区によってコースの料金に出張費を足せます
+              （出張は生徒が選んだ区、スタジオはスタジオのある区で決まります）。
+              設定すると、選んだ区だけが対応エリアになり、それ以外の場所では予約を受け付けません。
+            </p>
+            <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={areaFeeEnabled}
+                onChange={(e) => setAreaFeeEnabled(e.target.checked)}
+              />
+              区ごとに出張費を設定する
+            </label>
+
+            {areaFeeEnabled && (
+              <>
+                <div style={{ display: "flex", gap: 8, margin: "0.75rem 0" }}>
+                  <button
+                    type="button"
+                    className="admin-tool-button"
+                    onClick={() => setAllWards(true)}
+                  >
+                    すべての区を選ぶ
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-tool-button"
+                    onClick={() => setAllWards(false)}
+                  >
+                    すべて外す
+                  </button>
+                </div>
+                <div className="area-fee-grid">
+                  {TOKYO_WARDS.map((ward) => {
+                    const on = ward in areaFees;
+                    return (
+                      <div
+                        key={ward}
+                        className={`area-fee-row${on ? " is-on" : ""}`}
+                      >
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            onChange={() => toggleWard(ward)}
+                          />
+                          {ward}
+                        </label>
+                        <span className="area-fee-input">
+                          +
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            max={MAX_AREA_FEE}
+                            step={500}
+                            value={on ? areaFees[ward] : ""}
+                            disabled={!on}
+                            onChange={(e) =>
+                              setAreaFees((prev) => ({ ...prev, [ward]: e.target.value }))
+                            }
+                            aria-label={`${ward}の出張費`}
+                          />
+                          円
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p style={{ fontSize: "0.85rem", color: "#666", lineHeight: 1.8 }}>
+                  出張費のかからない区は 0 円のまま選んでください。
+                  出張費もレッスン料の一部として、手数料の計算に含まれます。
+                </p>
+              </>
+            )}
           </section>
         )}
 

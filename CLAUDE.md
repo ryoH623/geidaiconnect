@@ -68,6 +68,13 @@ firebase deploy --only functions   # デプロイ（predeploy で lint と build
 - Stripe 側の処理に失敗しても予約はキャンセルし、`paymentStatus: "refund_failed"` にして運営へメールする（Stripe の管理画面で手動返金）。
 - 運営による取り消しは `/admin/reservations/:id`（callable `adminCancelReservation`）。生徒の負担ゼロは同じだが、戻らない決済手数料は運営負担（`teacherCancellations` には記録しない）。与信取消・返金の処理は `voidOrRefundReservation()` を共用する。
 
+### 区ごとの出張費（東京23区）
+
+- 講師は `/teacher/profile` で「基本のレッスン料＋区ごとの出張費」を設定できる（`teacherProfiles.areaFees`、`{ 区名: 円 }`）。対象は出張とスタジオのレッスンで、出張は生徒が予約フォームで選んだ区、スタジオはスタジオの所在区（`studios.city`、東京都のみ）で決まる。
+- `areaFees` が空なら機能は使っていない扱いで出張費 0 円。1件でもあれば、設定した区だけが対応エリアになる（スタジオ検索からも外れる）。
+- `createReservationAndCheckout` はレッスン料をサーバーで照合する（コース料金＋出張費と一致しなければ拒否）。フロントの金額や URL の price は信用しない。予約には `lessonAmount`（出張費込み・手数料の対象）、`baseLessonAmount`、`area`、`areaFee` を保存する。
+- 23区の一覧と判定は [functions/src/areaFees.ts](functions/src/areaFees.ts) と [src/lib/teacherProfiles.ts](src/lib/teacherProfiles.ts) の両方にある。片方を変えたらもう片方も揃えること。
+
 ### 月末精算
 
 - `/admin/settlements` で月・講師ごとに「講師取り分 − 未精算の講師都合キャンセル手数料 = 振込額」を出し、CSV に書き出す。

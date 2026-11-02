@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useTeachers } from "../hooks/useTeachers";
-import { getCourses } from "../lib/teacherProfiles";
+import { AREA_FEE_LESSON_TYPES, getCourses, hasAreaFees } from "../lib/teacherProfiles";
 import type { LessonCourse } from "../lib/teacherProfiles";
 import ReviewList from "../components/ReviewList";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -290,6 +290,25 @@ const TeacherDetail: React.FC = () => {
                 ※出張レッスンの対応範囲：{teacher.travelRange}
               </p>
             )}
+            {/* 区ごとの出張費。出張・スタジオのコースがある講師だけ */}
+            {hasAreaFees(teacher) &&
+              courses.some((c) => AREA_FEE_LESSON_TYPES.includes(c.type)) && (
+                <details
+                  className="area-fee-note"
+                  style={{ fontSize: "0.85rem", color: "#8a8270", marginTop: "0.5rem" }}
+                >
+                  <summary>
+                    ※出張・スタジオのレッスンは、場所の区によって出張費が加わります（対応エリアを見る）
+                  </summary>
+                  <ul>
+                    {Object.entries(teacher.areaFees || {}).map(([ward, fee]) => (
+                      <li key={ward}>
+                        {ward}：{fee > 0 ? `+${fee.toLocaleString()}円` : "出張費なし"}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
             {trialUsed && courses.some((c) => c.isTrial) && (
               <p style={{ fontSize: "0.85rem", color: "#8a8270", marginTop: "0.5rem" }}>
                 ※体験レッスンは1回のみです。受講済みのため一覧に表示していません。
