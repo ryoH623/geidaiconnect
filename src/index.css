@@ -5385,3 +5385,54 @@ body {
   padding: 0;
   list-style: none;
 }
+
+/* 講師プロフィール編集：距離から出張費を入れる */
+.area-fee-tiers {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid #e5dcc6;
+  border-radius: 8px;
+  background: #fffdf7;
+}
+.area-fee-tiers h4 {
+  margin: 0 0 0.25rem;
+}
+.area-fee-tiers-lead,
+.area-fee-tiers-notice {
+  font-size: 0.85rem;
+  color: #666;
+  line-height: 1.8;
+  margin: 0 0 0.5rem;
+}
+.area-fee-tiers-notice {
+  color: #2e7d32;
+  margin-top: 0.5rem;
+}
+.area-fee-tier-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 0.5rem;
+}
+.area-fee-tier-row input {
+  width: 6em;
+  padding: 4px 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  text-align: right;
+}
+.area-fee-tier-remove {
+  border: none;
+  background: none;
+  color: #999;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+.area-fee-tiers .admin-tool-button {
+  margin-bottom: 0.75rem;
+}
+.area-fee-distance {
+  color: #8a8270;
+  font-size: 0.75rem;
+}
