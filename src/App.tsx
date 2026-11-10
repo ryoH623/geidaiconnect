@@ -48,6 +48,10 @@ const AdminStudents = lazy(() => import("./pages/admin/AdminStudents"));
 const AdminTeachers = lazy(() => import("./pages/admin/AdminTeachers"));
 const AdminTeacherDetail = lazy(() => import("./pages/admin/AdminTeacherDetail"));
 const AdminReservations = lazy(() => import("./pages/admin/AdminReservations"));
+const AdminReservationDetail = lazy(
+  () => import("./pages/admin/AdminReservationDetail")
+);
+const AdminSettlements = lazy(() => import("./pages/admin/AdminSettlements"));
 const AdminUsers = lazy(() => import("./pages/admin/AdminUsers"));
 const AdminReviews = lazy(() => import("./pages/admin/AdminReviews"));
 const AdminCoupons = lazy(() => import("./pages/admin/AdminCoupons"));
@@ -246,6 +250,22 @@ function App() {
             element={
               <RequireAdmin>
                 <AdminReservations />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/reservations/:id"
+            element={
+              <RequireAdmin>
+                <AdminReservationDetail />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/settlements"
+            element={
+              <RequireAdmin>
+                <AdminSettlements />
               </RequireAdmin>
             }
           />

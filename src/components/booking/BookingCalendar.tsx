@@ -280,6 +280,14 @@ export default function BookingCalendar({
     useState(initialSelectedTime);
   const [reservationError, setReservationError] = useState("");
 
+  // 親が日時を変えたとき（スタジオの空きがある別の時間を選んだときなど）は選択表示を合わせる。
+  // カレンダー内で日付だけ押した状態では親の値は変わらないので、ここは動かない
+  useEffect(() => {
+    if (!initialSelectedDate) return;
+    setSelectedReservationDate(initialSelectedDate);
+    setSelectedReservationTime(initialSelectedTime);
+  }, [initialSelectedDate, initialSelectedTime]);
+
   useEffect(() => {
     console.log("================ BookingCalendar props ログ ================");
     console.log("isReservationMode:", isReservationMode);

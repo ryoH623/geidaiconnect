@@ -24,6 +24,9 @@ interface Reservation {
   /** オンラインレッスンの参加URL（講師が登録するまで空） */
   meetingUrl: string;
   notes?: string;
+  /** 誰がキャンセルしたか（"student" | "teacher" | "operator"） */
+  cancelledBy: string;
+  cancelReason: string;
 }
 
 const PAYMENT_STATUS_LABELS: Record<string, string> = {
@@ -32,6 +35,7 @@ const PAYMENT_STATUS_LABELS: Record<string, string> = {
   paid: "支払済み",
   refunded: "返金済み",
   voided: "キャンセル（課金なし）",
+  refund_failed: "返金手続き中",
   payment_failed: "決済失敗",
   expired: "期限切れ",
 };
@@ -254,6 +258,8 @@ const StudentReservations: React.FC = () => {
             rescheduleCount:
               typeof d.rescheduleCount === "number" ? d.rescheduleCount : 0,
             notes: typeof d.notes === "string" ? d.notes : "",
+            cancelledBy: typeof d.cancelledBy === "string" ? d.cancelledBy : "",
+            cancelReason: typeof d.cancelReason === "string" ? d.cancelReason : "",
           };
         });
 
@@ -351,7 +357,18 @@ const StudentReservations: React.FC = () => {
                 <p>
                   <strong>予約状態：</strong>
                   {statusLabel(RESERVATION_STATUS_LABELS, res.reservationStatus)}
+                  {res.reservationStatus === "cancelled" &&
+                    res.cancelledBy === "teacher" &&
+                    "（講師の都合）"}
                 </p>
+                {res.reservationStatus === "cancelled" &&
+                  res.cancelledBy === "teacher" &&
+                  res.cancelReason && (
+                    <p>
+                      <strong>キャンセルの理由：</strong>
+                      {res.cancelReason}
+                    </p>
+                  )}
                 {res.notes && (
                   <p>
                     <strong>ご要望：</strong>

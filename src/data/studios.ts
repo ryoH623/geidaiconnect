@@ -38,6 +38,8 @@ export interface AvailableStudio {
   pricePerSlot: number;
   /** 講師拠点からの直線距離(km)。講師拠点が未設定の場合は null */
   distanceKm: number | null;
+  /** スタジオの所在区に対する講師の出張費（区ごとの設定が無い講師は 0） */
+  areaFee?: number;
   /** 生徒が選択した町名からの直線距離(km)。町名未選択・座標なしの場合は null */
   studentDistanceKm: number | null;
 }

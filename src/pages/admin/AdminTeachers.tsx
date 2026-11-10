@@ -41,7 +41,9 @@ const AdminTeachers: React.FC = () => {
               <tbody>
                 {stats.map((t) => (
                   <tr key={t.teacherId}>
-                    <td>{t.name}</td>
+                    <td>
+                      <Link to={`/admin/teachers/${t.teacherId}`}>{t.name}</Link>
+                    </td>
                     <td className="num">{yen(t.gmv)}</td>
                     <td className="num">{yen(t.commission)}</td>
                     <td className="num">{t.paidCount}</td>

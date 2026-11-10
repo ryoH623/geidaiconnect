@@ -7,6 +7,7 @@ import * as admin from "firebase-admin";
 import { https, logger, pubsub } from "firebase-functions/v1";
 
 import { wasDeletedEmail } from "./deletedEmails";
+import { APP_URL, sendMailSafe, buildInfoMailHtml } from "./mailer";
 
 // ========================================
 // キャンペーンの識別子
@@ -926,6 +927,59 @@ export async function processReferralMilestones(
   });
 }
 
+/**
+ * レッスン翌日のレビュー依頼メール。退会済みの生徒には送らない。
+ * キャンペーン期間中で、まだレビュー特典を受け取っていない生徒にだけクーポンの案内を添える。
+ */
+async function sendReviewRequestMail(
+  r: FirebaseFirestore.DocumentData
+): Promise<boolean> {
+  const userId = typeof r.userId === "string" ? r.userId : "";
+  const to =
+    (typeof r.userEmail === "string" && r.userEmail) ||
+    (typeof r.email === "string" && r.email) ||
+    "";
+  if (!userId || !to) return false;
+
+  const userSnap = await admin.firestore().collection("users").doc(userId).get();
+  const u = userSnap.data() || {};
+  if (!userSnap.exists || u.status === "deleted" || u.role !== "student") return false;
+
+  const grantSnap = await couponGrantRef(grantKeys.reviewUser(userId)).get();
+  const offerCoupon =
+    isWithinCampaign(REVIEW_CAMPAIGN_PERIOD, todayJstDate()) && !grantSnap.exists;
+  const spec = COUPON_SPECS.review;
+  const teacherName = String(r.teacherName ?? "");
+  const url = `${APP_URL.value()}/mypage/review?teacher=${encodeURIComponent(teacherName)}`;
+
+  await sendMailSafe({
+    to,
+    subject: "【Geidai Connect】レッスンはいかがでしたか？レビューのお願い",
+    html: buildInfoMailHtml({
+      greetingName: String(r.name || "ご利用者"),
+      intro: [
+        "先日はレッスンをご利用いただき、ありがとうございました。",
+        "よろしければ、レッスンの感想をレビューとしてお聞かせください。これから受講を考えている方の参考になり、講師の励みにもなります。",
+        ...(offerCoupon
+          ? [
+              `今ならレビューを投稿すると、次回のレッスンで使える「${spec.name}」（${spec.discountAmount.toLocaleString("ja-JP")}円引き）を差し上げます（お一人様1回まで）。`,
+            ]
+          : []),
+      ],
+      rows: [
+        ["講師", teacherName],
+        ["レッスン日時", `${String(r.lessonDate ?? "")} ${String(r.lessonTime ?? "")}`.trim()],
+        ["コース", String(r.lessonCourse ?? "")],
+      ],
+      outro: [
+        `<a href="${url}" style="display:inline-block;padding:10px 20px;background:#b89f6b;color:#fff;text-decoration:none;border-radius:6px;">レビューを書く</a>`,
+        "ログインが必要です。レビューは講師のページに掲載されます。",
+      ],
+    }),
+  });
+  return true;
+}
+
 // ========================================
 // Scheduled: レッスン完了の確定とキャンペーン判定
 //
@@ -939,6 +993,7 @@ export const finalizeCompletedLessons = pubsub
     const db = admin.firestore();
     const today = todayJstDate();
     const affectedUserIds = new Set<string>();
+    const reviewRequests: Array<{ id: string; r: FirebaseFirestore.DocumentData }> = [];
     let marked = 0;
 
     // 等価条件のみで絞る（範囲条件を混ぜると複合インデックスが必要になるため、
@@ -967,6 +1022,10 @@ export const finalizeCompletedLessons = pubsub
         marked += 1;
         if (typeof r.userId === "string" && r.userId) {
           affectedUserIds.add(r.userId);
+        }
+        // 完了フラグは1回しか立たないので、レビュー依頼もここで1回だけ送る
+        if (!(typeof r.reviewId === "string" && r.reviewId)) {
+          reviewRequests.push({ id: doc.id, r });
         }
       } catch (error) {
         logger.error("finalizeCompletedLessons: 完了フラグの更新に失敗", {
@@ -1012,9 +1071,22 @@ export const finalizeCompletedLessons = pubsub
       }
     }
 
+    let reviewMails = 0;
+    for (const { id, r } of reviewRequests) {
+      try {
+        if (await sendReviewRequestMail(r)) reviewMails += 1;
+      } catch (error) {
+        logger.error("finalizeCompletedLessons: レビュー依頼メールに失敗", {
+          reservationId: id,
+          error,
+        });
+      }
+    }
+
     logger.info("finalizeCompletedLessons done", {
       marked,
       users: affectedUserIds.size,
+      reviewMails,
     });
   });
 
@@ -1026,7 +1098,7 @@ export const finalizeCompletedLessons = pubsub
 // campaignAuditLogs に必ず残す（不正利用の判断根拠を後から追えるようにするため）。
 // ========================================
 
-async function requireAdmin(
+export async function requireAdmin(
   context: { auth?: { uid: string } | null }
 ): Promise<string> {
   if (!context.auth) {

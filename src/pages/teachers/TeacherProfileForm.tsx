@@ -7,14 +7,17 @@
 //
 // 保存は callable（saveMyTeacherProfile）経由。published はここから変えられず、
 // 公開するかどうかは運営が決める。
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { httpsCallable } from "firebase/functions";
 import { doc, getDoc } from "firebase/firestore";
 import { db, functions } from "../../firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import {
+  AREA_FEE_LESSON_TYPES,
+  MAX_AREA_FEE,
   MIN_LESSON_PRICE,
+  TOKYO_WARDS,
   TRAVEL_RANGES,
   fetchMyTeacherProfile,
   formatPrice,
@@ -22,6 +25,17 @@ import {
   type LessonType,
   type TeacherProfile,
 } from "../../lib/teacherProfiles";
+import { useTownsWithCoords } from "../../hooks/useJapaneseAddresses";
+import { WARD_OFFICE_COORDS, haversineKm } from "../../data/tokyoWards";
+
+/** 距離から出張費を入れるときの段階（既定値）。上から順に、その距離以内ならその金額 */
+const DEFAULT_FEE_TIERS = [
+  { maxKm: "5", fee: "0" },
+  { maxKm: "10", fee: "1000" },
+  { maxKm: "15", fee: "2000" },
+];
+/** 段階の上限数 */
+const MAX_FEE_TIERS = 5;
 
 const LESSON_TYPES: LessonType[] = ["自宅", "スタジオ", "出張", "オンライン"];
 
@@ -122,6 +136,14 @@ const TeacherProfileForm: React.FC = () => {
   const [onlineAvailable, setOnlineAvailable] = useState(false);
   const [onlinePrice, setOnlinePrice] = useState("");
   const [travelRange, setTravelRange] = useState("");
+  // 区ごとの出張費（東京23区）。入力中は文字列で持ち、対応しない区はキーごと消す
+  const [areaFeeEnabled, setAreaFeeEnabled] = useState(false);
+  const [areaFees, setAreaFees] = useState<Record<string, string>>({});
+  // 距離から出張費を自動で入れるための段階。保存はせず、入れた結果（areaFees）だけを保存する
+  const [feeTiers, setFeeTiers] = useState(DEFAULT_FEE_TIERS);
+  // 最後の段階より遠い区の出張費。空なら対応しない
+  const [farFee, setFarFee] = useState("");
+  const [tierNotice, setTierNotice] = useState("");
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -168,6 +190,12 @@ const TeacherProfileForm: React.FC = () => {
         setOnlineAvailable(p.onlineAvailable === true);
         setOnlinePrice(p.onlineLessonPrice ? String(p.onlineLessonPrice) : "");
         setTravelRange(p.travelRange || "");
+        setAreaFeeEnabled(!!p.areaFees && Object.keys(p.areaFees).length > 0);
+        setAreaFees(
+          Object.fromEntries(
+            Object.entries(p.areaFees || {}).map(([ward, fee]) => [ward, String(fee)])
+          )
+        );
       } catch (err) {
         console.error("プロフィールの取得に失敗しました", err);
         if (!cancelled) setLoadError("プロフィールの取得に失敗しました。");
@@ -214,6 +242,82 @@ const TeacherProfileForm: React.FC = () => {
 
   // 出張コースがある場合だけ、出張可能な範囲を聞く
   const hasTravelCourse = courses.some((c) => c.type === "出張");
+  // 出張・スタジオのコースがある場合だけ、区ごとの出張費を設定できる
+  const hasAreaFeeCourse = courses.some((c) =>
+    AREA_FEE_LESSON_TYPES.includes(c.type)
+  );
+  // 距離の起点（講師の自宅の町名の代表座標）。区ごとの出張費を設定するときだけ読む
+  const useAreaFeeTools = hasAreaFeeCourse && areaFeeEnabled;
+  const { towns: baseTowns, loading: baseTownsLoading } = useTownsWithCoords(
+    useAreaFeeTools ? prefecture : "",
+    useAreaFeeTools ? city : ""
+  );
+  const baseCoords = useMemo(() => {
+    const withCoords = baseTowns.filter(
+      (t) => typeof t.lat === "number" && typeof t.lng === "number"
+    );
+    if (withCoords.length === 0) return null;
+    // 郵便番号から入る町名（例: 桜新町）と住所データの町名（例: 桜新町一丁目）は
+    // 表記がずれることがあるため、前方一致まで見る
+    const name = town.trim();
+    const hit =
+      (name &&
+        (withCoords.find((t) => t.name === name) ||
+          withCoords.find((t) => t.name.startsWith(name) || name.startsWith(t.name)))) ||
+      null;
+    if (hit) return { lat: hit.lat as number, lng: hit.lng as number, label: `${city}${hit.name}` };
+    // 町名が引けなければ市区町村の中心（町名の代表座標の平均）
+    const lat = withCoords.reduce((sum, t) => sum + (t.lat as number), 0) / withCoords.length;
+    const lng = withCoords.reduce((sum, t) => sum + (t.lng as number), 0) / withCoords.length;
+    return { lat, lng, label: `${city}の中心` };
+  }, [baseTowns, town, city]);
+
+  // 各区の区役所までの直線距離(km)
+  const wardDistances = useMemo(() => {
+    if (!baseCoords) return {} as Record<string, number>;
+    return Object.fromEntries(
+      TOKYO_WARDS.map((w) => [w, haversineKm(baseCoords, WARD_OFFICE_COORDS[w])])
+    ) as Record<string, number>;
+  }, [baseCoords]);
+
+  /** 段階の設定から23区の出張費を入れ直す */
+  const applyFeeTiers = () => {
+    setTierNotice("");
+    if (!baseCoords) return;
+    const tiers = feeTiers
+      .map((t) => ({ maxKm: Number(t.maxKm), fee: Number(t.fee) }))
+      .filter((t) => t.maxKm > 0 && Number.isFinite(t.maxKm));
+    if (tiers.length === 0) {
+      setTierNotice("距離と金額を1段以上入力してください。");
+      return;
+    }
+    const invalid = [...tiers.map((t) => t.fee), ...(farFee.trim() ? [Number(farFee)] : [])].some(
+      (fee) => !Number.isInteger(fee) || fee < 0 || fee > MAX_AREA_FEE
+    );
+    if (invalid) {
+      setTierNotice(`金額は0円以上${formatPrice(MAX_AREA_FEE)}以下の整数で入力してください。`);
+      return;
+    }
+    if (
+      Object.keys(areaFees).length > 0 &&
+      !window.confirm("いま入っている区ごとの出張費を、この設定で入れ直します。よろしいですか？")
+    ) {
+      return;
+    }
+    tiers.sort((a, b) => a.maxKm - b.maxKm);
+    const next: Record<string, string> = {};
+    for (const ward of TOKYO_WARDS) {
+      const d = wardDistances[ward];
+      const tier = tiers.find((t) => d <= t.maxKm);
+      if (tier) next[ward] = String(tier.fee);
+      else if (farFee.trim()) next[ward] = String(Number(farFee));
+    }
+    setAreaFees(next);
+    setTierNotice(
+      `${Object.keys(next).length}区に出張費を入れました。必要に応じて区ごとに直してから保存してください。`
+    );
+  };
+
   // 自宅コースがある場合だけ、会場になる自宅の番地までを必須にする
   const hasHomeCourse = courses.some((c) => c.type === "自宅");
 
@@ -223,6 +327,23 @@ const TeacherProfileForm: React.FC = () => {
   const updateCourse = (index: number, patch: Partial<CourseDraft>) => {
     setCourses((prev) =>
       prev.map((c, i) => (i === index ? { ...c, ...patch } : c))
+    );
+  };
+
+  const toggleWard = (ward: string) => {
+    setAreaFees((prev) => {
+      const next = { ...prev };
+      if (ward in next) delete next[ward];
+      else next[ward] = "0";
+      return next;
+    });
+  };
+
+  const setAllWards = (on: boolean) => {
+    setAreaFees((prev) =>
+      on
+        ? Object.fromEntries(TOKYO_WARDS.map((w) => [w, prev[w] ?? "0"]))
+        : {}
     );
   };
 
@@ -252,6 +373,23 @@ const TeacherProfileForm: React.FC = () => {
 
     if (submit && courses.length === 0) {
       return "公開申請にはコースが1件以上必要です。";
+    }
+    if (hasAreaFeeCourse && areaFeeEnabled) {
+      const wards = Object.keys(areaFees);
+      if (wards.length === 0) {
+        return "区ごとの出張費: 対応する区を1つ以上選んでください。";
+      }
+      for (const ward of wards) {
+        const fee = Number(areaFees[ward]);
+        if (
+          areaFees[ward].trim() === "" ||
+          !Number.isInteger(fee) ||
+          fee < 0 ||
+          fee > MAX_AREA_FEE
+        ) {
+          return `区ごとの出張費: ${ward}は0円以上${formatPrice(MAX_AREA_FEE)}以下で入力してください。`;
+        }
+      }
     }
     if (submit && hasTravelCourse && !travelRange) {
       return "出張レッスンのコースがあるため、出張可能な範囲を選択してください。";
@@ -309,6 +447,13 @@ const TeacherProfileForm: React.FC = () => {
           isTrial: c.isTrial,
         })),
         travelRange: hasTravelCourse ? travelRange : "",
+        // 使わない場合は空で送る（サーバー側で丸ごと置き換える）
+        areaFees:
+          hasAreaFeeCourse && areaFeeEnabled
+            ? Object.fromEntries(
+                Object.entries(areaFees).map(([ward, fee]) => [ward, Number(fee)])
+              )
+            : {},
         onlineAvailable,
         ...(onlineAvailable && onlinePrice.trim()
           ? { onlineLessonPrice: Number(onlinePrice) }
@@ -438,7 +583,7 @@ const TeacherProfileForm: React.FC = () => {
                 style={{ ...inputStyle, background: "#f7f5f0" }}
               />
               <span style={{ fontSize: "0.8rem", color: "#666" }}>
-                講師ページには都道府県と市区町村までを掲載します。
+                講師ページには都道府県と市区町村までを掲載します。自宅レッスンのコースがある場合は、予約画面に町名まで表示します。
               </span>
             </label>
 
@@ -456,7 +601,7 @@ const TeacherProfileForm: React.FC = () => {
                 {hasHomeCourse
                   ? "自宅レッスンのコースがあるため必須です。"
                   : "自宅レッスンのコースを作る場合は必須です。"}
-                講師ページには掲載されず、自宅レッスンのご予約が確定した生徒にのみ予約確認メールでお知らせします。
+                講師ページには掲載されず、自宅レッスンを予約した生徒にのみ予約受付メールでお知らせします。
               </span>
             </label>
           </div>
@@ -681,6 +826,187 @@ const TeacherProfileForm: React.FC = () => {
                 </option>
               ))}
             </select>
+          </section>
+        )}
+
+        {/* 区ごとの出張費。出張・スタジオのコースがあるときだけ聞く */}
+        {hasAreaFeeCourse && (
+          <section style={{ marginTop: "2rem" }}>
+            <h3>区ごとの出張費（東京23区）</h3>
+            <p style={{ fontSize: "0.85rem", color: "#666", lineHeight: 1.8 }}>
+              出張・スタジオのレッスンは、場所の区によってコースの料金に出張費を足せます
+              （出張は生徒が選んだ区、スタジオはスタジオのある区で決まります）。
+              設定すると、選んだ区だけが対応エリアになり、それ以外の場所では予約を受け付けません。
+            </p>
+            <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={areaFeeEnabled}
+                onChange={(e) => setAreaFeeEnabled(e.target.checked)}
+              />
+              区ごとに出張費を設定する
+            </label>
+
+            {areaFeeEnabled && (
+              <>
+                <div className="area-fee-tiers">
+                  <h4>距離から自動で入れる</h4>
+                  {baseCoords ? (
+                    <p className="area-fee-tiers-lead">
+                      ご自宅（{baseCoords.label}）から各区の区役所までの直線距離で、出張費を入れます。
+                      入れたあとに区ごとに直せます。
+                    </p>
+                  ) : (
+                    <p className="area-fee-tiers-lead">
+                      {baseTownsLoading
+                        ? "ご自宅の位置を調べています…"
+                        : "上の「住所」で郵便番号（または都道府県・市区町村）を入力すると使えます。"}
+                    </p>
+                  )}
+                  {feeTiers.map((t, i) => (
+                    <div key={i} className="area-fee-tier-row">
+                      <span>{i === 0 ? "" : "〜"}</span>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        value={t.maxKm}
+                        onChange={(e) =>
+                          setFeeTiers((prev) =>
+                            prev.map((x, j) => (j === i ? { ...x, maxKm: e.target.value } : x))
+                          )
+                        }
+                        aria-label={`${i + 1}段目の距離`}
+                      />
+                      <span>km まで：+</span>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        max={MAX_AREA_FEE}
+                        step={500}
+                        value={t.fee}
+                        onChange={(e) =>
+                          setFeeTiers((prev) =>
+                            prev.map((x, j) => (j === i ? { ...x, fee: e.target.value } : x))
+                          )
+                        }
+                        aria-label={`${i + 1}段目の出張費`}
+                      />
+                      <span>円</span>
+                      {feeTiers.length > 1 && (
+                        <button
+                          type="button"
+                          className="area-fee-tier-remove"
+                          onClick={() => setFeeTiers((prev) => prev.filter((_, j) => j !== i))}
+                          aria-label={`${i + 1}段目を削除`}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {feeTiers.length < MAX_FEE_TIERS && (
+                    <button
+                      type="button"
+                      className="admin-tool-button"
+                      onClick={() =>
+                        setFeeTiers((prev) => [...prev, { maxKm: "", fee: "" }])
+                      }
+                    >
+                      段階を追加
+                    </button>
+                  )}
+                  <div className="area-fee-tier-row">
+                    <span>それより遠い区：+</span>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      max={MAX_AREA_FEE}
+                      step={500}
+                      value={farFee}
+                      onChange={(e) => setFarFee(e.target.value)}
+                      placeholder="空欄"
+                      aria-label="それより遠い区の出張費"
+                    />
+                    <span>円（空欄なら対応しない）</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="form-button"
+                    onClick={applyFeeTiers}
+                    disabled={!baseCoords}
+                  >
+                    この設定で23区の出張費を入れる
+                  </button>
+                  {tierNotice && <p className="area-fee-tiers-notice">{tierNotice}</p>}
+                </div>
+
+                <div style={{ display: "flex", gap: 8, margin: "0.75rem 0" }}>
+                  <button
+                    type="button"
+                    className="admin-tool-button"
+                    onClick={() => setAllWards(true)}
+                  >
+                    すべての区を選ぶ
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-tool-button"
+                    onClick={() => setAllWards(false)}
+                  >
+                    すべて外す
+                  </button>
+                </div>
+                <div className="area-fee-grid">
+                  {TOKYO_WARDS.map((ward) => {
+                    const on = ward in areaFees;
+                    return (
+                      <div
+                        key={ward}
+                        className={`area-fee-row${on ? " is-on" : ""}`}
+                      >
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            onChange={() => toggleWard(ward)}
+                          />
+                          {ward}
+                          {typeof wardDistances[ward] === "number" && (
+                            <small className="area-fee-distance">
+                              約{wardDistances[ward].toFixed(1)}km
+                            </small>
+                          )}
+                        </label>
+                        <span className="area-fee-input">
+                          +
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            max={MAX_AREA_FEE}
+                            step={500}
+                            value={on ? areaFees[ward] : ""}
+                            disabled={!on}
+                            onChange={(e) =>
+                              setAreaFees((prev) => ({ ...prev, [ward]: e.target.value }))
+                            }
+                            aria-label={`${ward}の出張費`}
+                          />
+                          円
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p style={{ fontSize: "0.85rem", color: "#666", lineHeight: 1.8 }}>
+                  出張費のかからない区は 0 円のまま選んでください。
+                  出張費には運営手数料がかからず、全額が講師の取り分になります。
+                </p>
+              </>
+            )}
           </section>
         )}
 

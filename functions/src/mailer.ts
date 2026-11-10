@@ -14,6 +14,9 @@ export const SMTP_PORT = defineString("SMTP_PORT");
 export const SMTP_USER = defineString("SMTP_USER");
 export const SMTP_PASS = defineString("SMTP_PASS");
 
+/** メール本文に載せるサイトの URL（index.ts / campaigns.ts の両方から使う） */
+export const APP_URL = defineString("APP_URL");
+
 export function makeTransport() {
   const port = Number(SMTP_PORT.value());
 

@@ -501,6 +501,310 @@ a[href^="mailto"] {
   font-variant-numeric: tabular-nums;
 }
 
+/* 予約一覧（管理）: タブ・検索・表・状態バッジ */
+.admin-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 1.5rem 0 0.5rem;
+  border-bottom: 1px solid #e3dccb;
+}
+
+.admin-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.6rem 0.9rem;
+  border: none;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  color: #8a8270;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.admin-tab.is-active {
+  color: #4a3f2a;
+  font-weight: bold;
+  border-bottom-color: #b89f6b;
+}
+
+.admin-tab-count {
+  min-width: 1.6em;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: #f1ece0;
+  color: #6b604a;
+  font-size: 0.78rem;
+  font-weight: normal;
+  text-align: center;
+}
+
+.admin-search {
+  flex: 1 1 240px;
+  max-width: 360px;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #d8d2c4;
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+.admin-alert {
+  margin: 1rem 0 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid #f0c2c2;
+  border-radius: 8px;
+  background: #fdf1f1;
+  color: #a12626;
+}
+
+.admin-empty {
+  padding: 2.5rem 1rem;
+  text-align: center;
+  color: #8a8270;
+  background: #fff;
+  border: 1px solid #ece7db;
+  border-radius: 12px;
+}
+
+.admin-table-card {
+  overflow-x: auto;
+  background: #fff;
+  border: 1px solid #ece7db;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+}
+
+.admin-table--reservations th {
+  background: #faf7f0;
+  color: #6b604a;
+  font-size: 0.85rem;
+  font-weight: bold;
+}
+
+.admin-table--reservations td {
+  vertical-align: top;
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+
+.admin-table--reservations .cell-wrap {
+  white-space: normal;
+  min-width: 10rem;
+}
+
+.admin-table--reservations .cell-main {
+  color: #3a2e1f;
+}
+
+.admin-table--reservations .cell-sub {
+  margin-top: 0.2rem;
+  font-size: 0.8rem;
+  color: #8a8270;
+}
+
+.status-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.12rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  border: 1px solid transparent;
+}
+
+.status-badge--green { background: #e8f5ec; color: #23703f; border-color: #c4e5cf; }
+.status-badge--blue  { background: #e9f1fb; color: #24589a; border-color: #c6daf2; }
+.status-badge--amber { background: #fdf4e3; color: #8a5a0b; border-color: #f0dcb1; }
+.status-badge--red   { background: #fdeeee; color: #a12626; border-color: #f2c7c7; }
+.status-badge--gray  { background: #f2f0eb; color: #6f6857; border-color: #e1ddd3; }
+
+.admin-table tbody tr.is-clickable {
+  cursor: pointer;
+}
+
+.status-stack--row {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.admin-tool-button {
+  padding: 0.45rem 0.9rem;
+  border: 1px solid #b89f6b;
+  border-radius: 8px;
+  background: #fff;
+  color: #6b5427;
+  font-size: 0.9rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.admin-tool-button:hover:not(:disabled) {
+  background: #faf5ea;
+}
+
+.admin-tool-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.admin-link-button {
+  margin-top: 0.2rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #8a6d2f;
+  font-size: 0.8rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.admin-success {
+  margin: 1rem 0 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid #c4e5cf;
+  border-radius: 8px;
+  background: #eef8f1;
+  color: #23703f;
+}
+
+.detail-subrow > td {
+  background: #faf8f2;
+  padding: 0.4rem 1rem 0.8rem;
+}
+
+/* 予約詳細（管理） */
+.detail-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  margin: 1.5rem 0 1rem;
+  padding: 1rem 1.2rem;
+  background: #fff;
+  border: 1px solid #ece7db;
+  border-radius: 12px;
+}
+
+.detail-header-date {
+  font-size: 1.3rem;
+  font-weight: bold;
+  color: #3a2e1f;
+}
+
+.detail-header-sub {
+  margin-top: 0.2rem;
+  color: #6b604a;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.detail-card {
+  margin-bottom: 0;
+  padding-bottom: 1rem;
+}
+
+.detail-list {
+  margin: 0;
+}
+
+.detail-row {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr;
+  gap: 0.6rem;
+  padding: 0.4rem 0.4rem;
+  border-top: 1px solid #f1ece0;
+}
+
+.detail-row dt {
+  color: #8a8270;
+  font-size: 0.88rem;
+}
+
+.detail-row dd {
+  margin: 0;
+  color: #3a2e1f;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.detail-note {
+  margin: 0.5rem 0 1rem;
+  font-size: 0.88rem;
+  line-height: 1.7;
+  color: #6b604a;
+}
+
+.detail-danger {
+  margin-top: 1.5rem;
+  border-color: #f2c7c7;
+  padding: 1.2rem;
+}
+
+.detail-label {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-size: 0.9rem;
+  color: #4a3f2a;
+}
+
+.detail-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #d8d2c4;
+  border-radius: 8px;
+  font: inherit;
+}
+
+.detail-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+  font-size: 0.9rem;
+  color: #4a3f2a;
+}
+
+.detail-danger-button {
+  margin-top: 1rem;
+  padding: 0.6rem 1.2rem;
+  border: none;
+  border-radius: 8px;
+  background: #b3261e;
+  color: #fff;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.detail-danger-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (max-width: 600px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-row {
+    grid-template-columns: 6rem 1fr;
+  }
+}
+
 /* グラフの軸・凡例の文字サイズ（Recharts の SVG テキスト） */
 .admin-chart-card .recharts-text {
   font-size: 12px;
@@ -4852,4 +5156,283 @@ body {
 .review-empty-note {
   color: #6b5f4e;
   font-size: 0.92rem;
+}
+
+/* =========================================================
+   トップページの並び（講師一覧 → とは・特徴 → 流れ → 依頼・講師募集 → FAQ）
+   ========================================================= */
+
+/* 講師一覧がヒーローの直後に来るので、上の余白をここで取る */
+.top-page > .search-section {
+  margin-top: 4rem;
+  margin-bottom: 3rem;
+}
+
+.top-section-lead {
+  margin: -2rem 0 1.6rem;
+  color: #6b5f4e;
+  line-height: 1.9;
+}
+
+.top-about {
+  scroll-margin-top: 140px;
+}
+
+.top-about h3 .heading-reading {
+  display: block;
+  margin-top: 0.3em;
+  font-size: 0.5em;
+  font-weight: normal;
+  color: #8a8270;
+}
+
+.feature-grid--three {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+/* 写真が未登録の講師カード */
+.tcard-photo--placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #2a2219 0%, #3a2f20 55%, #241d14 100%);
+}
+
+.tcard-photo--placeholder span {
+  font-family: "Noto Serif JP", serif;
+  font-size: 4.2rem;
+  font-weight: 600;
+  background: linear-gradient(120deg, #ecd9a8 0%, #b89f6b 45%, #f0e2bf 75%, #c9a96f 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* ご依頼・講師募集の入口 */
+.top-entry-grid {
+  /* 上下のセクション（max-width 960px ＋ 左右 padding 1.5rem）と端をそろえる */
+  max-width: calc(960px + 3rem);
+  margin: 0 auto 3rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.5rem;
+}
+
+.top-entry-card {
+  display: flex;
+  gap: 1.3rem;
+  align-items: flex-start;
+  padding: 2rem 1.8rem;
+  background: #fff;
+  border: 1px solid #e9dfc9;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  color: inherit;
+  text-decoration: none;
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.top-entry-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px rgba(58, 46, 31, 0.12);
+  color: inherit;
+}
+
+.top-entry-card .feature-icon {
+  flex: none;
+  margin: 0;
+  width: 56px;
+  height: 56px;
+  font-size: 1.3rem;
+}
+
+.top-entry-body h3 {
+  margin: 0.2rem 0 0.6rem;
+  font-size: 1.2rem;
+  color: #3a2e1f;
+}
+
+.top-entry-body p {
+  margin: 0 0 0.9rem;
+  font-size: 0.92rem;
+  line-height: 1.85;
+  color: #6b5f4e;
+}
+
+.top-entry-cta {
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: #8a6d3f;
+}
+
+.top-entry-cta svg {
+  margin-left: 0.3rem;
+  font-size: 0.75em;
+}
+
+/* よくあるご質問（抜粋） */
+.top-faq-list {
+  margin: 0;
+}
+
+.top-faq-item {
+  padding: 1.1rem 0.2rem;
+  border-top: 1px solid #efe7d6;
+}
+
+.top-faq-item:last-child {
+  border-bottom: 1px solid #efe7d6;
+}
+
+.top-faq-item dt {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  font-weight: 600;
+  color: #3a2e1f;
+}
+
+.top-faq-mark {
+  flex: none;
+  font-family: "Noto Serif JP", serif;
+  font-size: 1.1rem;
+  color: #b89f6b;
+}
+
+.top-faq-item dd {
+  margin: 0.45rem 0 0 1.75rem;
+  font-size: 0.92rem;
+  line-height: 1.85;
+  color: #6b5f4e;
+}
+
+@media (max-width: 768px) {
+  .top-page > .search-section {
+    margin-top: 2.5rem;
+  }
+
+  .top-entry-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+
+  .top-entry-card {
+    padding: 1.5rem 1.2rem;
+    gap: 1rem;
+  }
+
+  .top-entry-card .feature-icon {
+    width: 48px;
+    height: 48px;
+    font-size: 1.1rem;
+  }
+
+  .top-section-lead {
+    margin-top: -1.5rem;
+  }
+}
+
+/* 講師プロフィール編集：区ごとの出張費 */
+.area-fee-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px 16px;
+}
+.area-fee-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: #999;
+}
+.area-fee-row.is-on {
+  background: #faf6ec;
+  color: inherit;
+}
+.area-fee-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.area-fee-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.area-fee-input input {
+  width: 6.5em;
+  padding: 4px 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  text-align: right;
+}
+
+/* 講師詳細：区ごとの出張費の一覧 */
+.area-fee-note summary {
+  cursor: pointer;
+}
+.area-fee-note ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 2px 12px;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 講師プロフィール編集：距離から出張費を入れる */
+.area-fee-tiers {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid #e5dcc6;
+  border-radius: 8px;
+  background: #fffdf7;
+}
+.area-fee-tiers h4 {
+  margin: 0 0 0.25rem;
+}
+.area-fee-tiers-lead,
+.area-fee-tiers-notice {
+  font-size: 0.85rem;
+  color: #666;
+  line-height: 1.8;
+  margin: 0 0 0.5rem;
+}
+.area-fee-tiers-notice {
+  color: #2e7d32;
+  margin-top: 0.5rem;
+}
+.area-fee-tier-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 0.5rem;
+}
+.area-fee-tier-row input {
+  width: 6em;
+  padding: 4px 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  text-align: right;
+}
+.area-fee-tier-remove {
+  border: none;
+  background: none;
+  color: #999;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+.area-fee-tiers .admin-tool-button {
+  margin-bottom: 0.75rem;
+}
+.area-fee-distance {
+  color: #8a8270;
+  font-size: 0.75rem;
 }

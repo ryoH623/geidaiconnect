@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { getAuth } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import BookingCalendar from '../components/booking/BookingCalendar';
 import { useTeachers } from '../hooks/useTeachers';
-import { getCourses } from '../lib/teacherProfiles';
+import { areaFeeFor, getCourses, hasAreaFees } from '../lib/teacherProfiles';
 import { prefectures } from '../data/prefectures';
 import { citiesByPrefecture } from '../data/citiesByPrefecture';
 import type { AvailableStudio } from '../data/studios';
@@ -58,12 +58,71 @@ type CreateReservationAndCheckoutPayload = {
   studioFee?: number;
   // 値引き額はサーバー側で再計算されるため、クーポンのIDだけを送る
   couponId?: string;
+  /** 出張先の区（区ごとの出張費を設定している講師のみ） */
+  area?: string;
 };
 
 type GetAvailableStudiosResult = {
   ok: boolean;
   studios: AvailableStudio[];
+  /** 指定の範囲では空きが無く、自動で広げて見つけたときの範囲(km) */
+  expandedRadiusKm?: number;
+  /** 空きが無いとき、同じ日の別の時間で空きスタジオがある時間と件数 */
+  alternatives?: { time: string; count: number }[];
 };
+
+/** 検索範囲の選択肢(km)。サーバーの STUDIO_RADIUS_STEPS_KM と揃える */
+const STUDIO_RADIUS_OPTIONS_KM = [3, 5, 10, 20];
+
+/**
+ * 前回スタジオ予約したときの探し方。users/{uid}.lastStudioSearch に保存し、
+ * 次の予約で同じ場所から自動で探して、同じスタジオに空きがあれば選んでおく。
+ */
+type LastStudioSearch = {
+  mode: 'address' | 'station';
+  prefecture: string;
+  city: string;
+  town: string;
+  station: StationHit | null;
+  radiusKm: number;
+  studioId: string;
+};
+
+function readLastStudioSearch(v: unknown): LastStudioSearch | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  const st = o.station as Record<string, unknown> | null | undefined;
+  const station: StationHit | null =
+    st &&
+    typeof st.name === 'string' &&
+    typeof st.prefecture === 'string' &&
+    typeof st.lat === 'number' &&
+    typeof st.lng === 'number'
+      ? {
+          name: st.name,
+          prefecture: st.prefecture,
+          lat: st.lat,
+          lng: st.lng,
+          lines: Array.isArray(st.lines)
+            ? st.lines.filter((l): l is string => typeof l === 'string')
+            : [],
+        }
+      : null;
+  const mode = o.mode === 'station' && station ? 'station' : 'address';
+  const prefecture = typeof o.prefecture === 'string' ? o.prefecture : '';
+  if (mode === 'address' && !prefecture) return null;
+  return {
+    mode,
+    prefecture,
+    city: typeof o.city === 'string' ? o.city : '',
+    town: typeof o.town === 'string' ? o.town : '',
+    station,
+    radiusKm: STUDIO_RADIUS_OPTIONS_KM.includes(o.radiusKm as number)
+      ? (o.radiusKm as number)
+      : 5,
+    studioId: typeof o.studioId === 'string' ? o.studioId : '',
+  };
+}
 
 type CreateReservationAndCheckoutResult = {
   ok: boolean;
@@ -137,6 +196,18 @@ const ReservationForm: React.FC = () => {
   const [studioResults, setStudioResults] = useState<AvailableStudio[]>([]);
   const [selectedStudio, setSelectedStudio] = useState<AvailableStudio | null>(null);
   const [studioSearchError, setStudioSearchError] = useState('');
+  const [studioExpandedRadiusKm, setStudioExpandedRadiusKm] = useState<number | null>(null);
+  const [studioAlternatives, setStudioAlternatives] = useState<
+    { time: string; count: number }[]
+  >([]);
+  // 前回予約したスタジオ。検索結果にあれば先頭に出して選んでおく
+  const [lastStudioId, setLastStudioId] = useState('');
+  // 自動検索の順番。条件が変わったら古い検索の結果は捨てる
+  const studioSearchSeqRef = useRef(0);
+  // この画面で選んだスタジオ。日時や場所を変えて探し直しても、空いていれば選んだままにする
+  const preferredStudioIdRef = useRef('');
+  // 出張先の区。区ごとの出張費を設定している講師の出張レッスンでだけ選ばせる
+  const [travelArea, setTravelArea] = useState('');
 
   // ── 入力内容の下書き（ブラウザバック対策）─────────────────────────
   // 講師詳細へ戻ってから再度この画面に来ても入力し直さずに済むよう、
@@ -314,10 +385,12 @@ const ReservationForm: React.FC = () => {
     return foundCourse;
   }, [teacherIdFromQuery, teacherNameFromQuery, lessonCourse, teachers]);
 
-  const lessonAmount = useMemo(() => {
-    // コースの料金は数値、クエリ由来は文字列。どちらも来るので文字列に寄せて解釈する
+  const baseLessonAmount = useMemo(() => {
+    // コースの料金は数値、クエリ由来は文字列。どちらも来るので文字列に寄せて解釈する。
+    // 講師のコース料金を優先し、URL の price は講師情報が引けないときの予備にする
+    // （実際の請求額はサーバーが講師の設定と照合する）。
     const priceSource = String(
-      priceFromQuery || selectedTeacherCourse?.price || lessonCourse
+      selectedTeacherCourse?.price || priceFromQuery || lessonCourse
     );
     const normalized = priceSource.replace(/,/g, '');
     const match = normalized.match(/(\d{3,6})\s*円?/);
@@ -370,6 +443,54 @@ const ReservationForm: React.FC = () => {
   const isStudioFlow = displayLessonType === 'スタジオ';
   // オンライン予約フローか。会場がないためレッスン場所は「オンライン」で固定する。
   const isOnlineFlow = displayLessonType === 'オンライン';
+  // 自宅レッスンか。会場は講師の自宅なので、生徒には入力させず町名までを表示する。
+  // 番地は予約受付メールで知らせる（functions の sendPaymentCompletedEmails）。
+  const isHomeFlow = displayLessonType === '自宅';
+  // 出張レッスンか。会場は生徒が指定する場所
+  const isTravelFlow = displayLessonType === '出張';
+
+  const currentTeacher = useMemo(
+    () =>
+      teachers.find((t) => t.authUid === teacherIdFromQuery) ||
+      teachers.find((t) => t.name === teacherNameFromQuery) ||
+      null,
+    [teachers, teacherIdFromQuery, teacherNameFromQuery]
+  );
+
+  // 区ごとの出張費を設定している講師の出張レッスンは、出張先の区を選ばせる
+  const needsTravelArea =
+    isTravelFlow && !!currentTeacher && hasAreaFees(currentTeacher);
+  const travelAreaOptions = useMemo(
+    () =>
+      currentTeacher?.areaFees
+        ? Object.entries(currentTeacher.areaFees).map(([ward, fee]) => ({ ward, fee }))
+        : [],
+    [currentTeacher]
+  );
+
+  // 出張費。出張は選んだ区、スタジオはスタジオの所在区（サーバーが検索結果に付けて返す）
+  const areaFee = useMemo(() => {
+    if (needsTravelArea && currentTeacher && travelArea) {
+      return areaFeeFor(currentTeacher, travelArea) ?? 0;
+    }
+    if (isStudioFlow && selectedStudio) return selectedStudio.areaFee ?? 0;
+    return 0;
+  }, [needsTravelArea, currentTeacher, travelArea, isStudioFlow, selectedStudio]);
+  const areaFeeLabel = isStudioFlow ? '講師の出張費' : `出張費（${travelArea}）`;
+
+  // レッスン料（出張費込み）。サーバーへ送り、講師の設定と照合される
+  const lessonAmount =
+    baseLessonAmount === null ? null : baseLessonAmount + areaFee;
+
+  const homeLocationLabel = useMemo(() => {
+    const teacher =
+      teachers.find((t) => t.authUid === teacherIdFromQuery) ||
+      teachers.find((t) => t.name === teacherNameFromQuery);
+    const area = teacher
+      ? `${teacher.prefecture}${teacher.city}${teacher.homeTown || ''}`
+      : '';
+    return area ? `講師のご自宅（${area}）` : '講師のご自宅';
+  }, [teachers, teacherIdFromQuery, teacherNameFromQuery]);
 
   // 市区町村候補は Geolonia 住所マスタ（全市区町村を網羅）から取得。
   // マスタ取得失敗時は静的リスト（citiesByPrefecture）にフォールバック
@@ -491,9 +612,25 @@ const ReservationForm: React.FC = () => {
 
         setFormData((prev) => ({ ...prev, name, furigana, email, phone }));
 
-        const pref = d.prefecture;
-        if (typeof pref === 'string' && pref) {
-          setRegionPref((prev) => prev || pref);
+        // スタジオを探す場所。前回のスタジオ予約の探し方があればそれを、
+        // 無ければ会員情報の都道府県・市区町村を初期値にする
+        const last = readLastStudioSearch(d.lastStudioSearch);
+        if (last) {
+          setStudioSearchMode(last.mode);
+          setRegionPref(last.prefecture);
+          setRegionCity(last.city);
+          setRegionTown(last.town);
+          setSelectedStation(last.station);
+          if (last.station) setStationKeyword(last.station.name);
+          setSearchRadiusKm(last.radiusKm);
+          setLastStudioId(last.studioId);
+        } else {
+          const pref = typeof d.prefecture === 'string' ? d.prefecture : '';
+          const city = typeof d.city === 'string' ? d.city : '';
+          if (pref) {
+            setRegionPref((prev) => prev || pref);
+            if (city) setRegionCity((prev) => prev || city);
+          }
         }
 
         // プロフィール未完のチェック（欠けている項目名を控える）
@@ -524,7 +661,14 @@ const ReservationForm: React.FC = () => {
   }, [isOnlineFlow]);
 
   useEffect(() => {
-    if (isOnlineFlow) return;
+    if (!isHomeFlow) return;
+    setFormData((prev) =>
+      prev.location === homeLocationLabel ? prev : { ...prev, location: homeLocationLabel }
+    );
+  }, [isHomeFlow, homeLocationLabel]);
+
+  useEffect(() => {
+    if (isOnlineFlow || isHomeFlow) return;
     setFormData((prev) => {
       if (prev.location.trim()) return prev;
       if (!displayLocationHint) return prev;
@@ -536,7 +680,7 @@ const ReservationForm: React.FC = () => {
         location: displayLocationHint,
       };
     });
-  }, [displayLocationHint, isOnlineFlow]);
+  }, [displayLocationHint, isOnlineFlow, isHomeFlow]);
 
   useEffect(() => {
     setFormData((prev) => {
@@ -579,10 +723,12 @@ const ReservationForm: React.FC = () => {
     setSelectedDate(date);
     setSelectedTime(time);
 
-    // 日時が変わると空き状況も変わるため、スタジオ検索結果はリセット
+    // 日時が変わると空き状況も変わるため、スタジオ検索結果はリセット（自動で探し直す）
     setStudioResults([]);
     setSelectedStudio(null);
     setStudioSearchError('');
+    setStudioExpandedRadiusKm(null);
+    setStudioAlternatives([]);
 
     setErrors((prev) => ({
       ...prev,
@@ -591,29 +737,21 @@ const ReservationForm: React.FC = () => {
     }));
   };
 
-  const handleSearchStudios = async () => {
-    if (!teacherInfo?.authUid) {
-      setStudioSearchError('講師情報の取得に失敗しました。');
-      return;
-    }
-    if (!selectedDate || !selectedTime) {
-      setStudioSearchError('先にカレンダーからレッスン日時を選択してください。');
-      return;
-    }
-    if (studioSearchMode === 'station') {
-      if (!selectedStation) {
-        setStudioSearchError('最寄り駅を検索して選択してください。');
-        return;
-      }
-    } else if (!regionPref) {
-      setStudioSearchError('地域（都道府県）を選択してください。');
-      return;
-    }
+  // 自動検索に必要な条件がそろっているか。町名の読込中は基準地点が変わるので待つ
+  const studioSearchReady =
+    isStudioFlow &&
+    !!teacherInfo?.authUid &&
+    !!selectedDate &&
+    !!selectedTime &&
+    (studioSearchMode === 'station'
+      ? !!selectedStation
+      : !!regionPref && !(regionCity && regionTownsLoading));
+
+  const searchStudios = async (seq: number) => {
+    if (!teacherInfo?.authUid) return;
 
     setStudioSearching(true);
     setStudioSearchError('');
-    setStudioResults([]);
-    setSelectedStudio(null);
 
     try {
       const functions = getFunctions(undefined, 'us-central1');
@@ -650,34 +788,104 @@ const ReservationForm: React.FC = () => {
               city: regionCity || undefined,
             }),
       });
+      // 検索中に条件が変わっていたら、この結果は使わない
+      if (seq !== studioSearchSeqRef.current) return;
 
       const list = result.data?.studios ?? [];
-      console.log('getAvailableStudios result:', list);
+      console.log('getAvailableStudios result:', result.data);
       setStudioResults(list);
+      setStudioExpandedRadiusKm(result.data?.expandedRadiusKm ?? null);
+      setStudioAlternatives(result.data?.alternatives ?? []);
+
+      // 選んでいたスタジオが残っていればそのまま、無ければ前回のスタジオを選んでおく
+      const keep =
+        list.find((s) => s.id === preferredStudioIdRef.current) ??
+        list.find((s) => s.id === lastStudioId);
+      if (keep) {
+        handleSelectStudio(keep);
+      } else {
+        setSelectedStudio(null);
+      }
 
       if (list.length === 0) {
         setStudioSearchError(
-          searchCenter
-            ? `この場所から${searchRadiusKm}km以内に、空きスタジオが見つかりませんでした。距離を広げるか、日時を変えてお試しください。`
-            : '条件に合う空きスタジオが見つかりませんでした。地域や日時を変えてお試しください。'
+          (result.data?.alternatives ?? []).length > 0
+            ? 'この時間は近くに空きスタジオがありません。下の時間なら空きがあります。'
+            : searchCenter
+              ? `この場所から${Math.max(searchRadiusKm, ...STUDIO_RADIUS_OPTIONS_KM)}km以内に、この日の空きスタジオが見つかりませんでした。別の日や場所でお試しください。`
+              : '条件に合う空きスタジオが見つかりませんでした。地域や日時を変えてお試しください。'
         );
       }
     } catch (error: any) {
+      if (seq !== studioSearchSeqRef.current) return;
       console.error('スタジオ検索に失敗しました:', error);
       setStudioSearchError(error?.message || 'スタジオ検索に失敗しました。');
     } finally {
-      setStudioSearching(false);
+      if (seq === studioSearchSeqRef.current) setStudioSearching(false);
     }
   };
 
+  // 日時と場所がそろったら自動で空きスタジオを探す（検索ボタンは押させない）。
+  // 選択の途中で何度も照会しないよう、少し待ってから検索する
+  useEffect(() => {
+    const seq = ++studioSearchSeqRef.current;
+    if (!studioSearchReady) {
+      setStudioSearching(false);
+      setStudioExpandedRadiusKm(null);
+      setStudioAlternatives([]);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void searchStudios(seq);
+    }, 400);
+    return () => window.clearTimeout(timer);
+    // searchStudios は下の値から作られるため、それらの変化だけを見る
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    studioSearchReady,
+    teacherInfo?.authUid,
+    selectedDate,
+    selectedTime,
+    studioSearchMode,
+    regionPref,
+    regionCity,
+    searchCenter,
+    searchRadiusKm,
+    lessonDurationMin,
+  ]);
+
+  // 前回のスタジオは一覧の先頭に出す（それ以外は近い順のまま）
+  const sortedStudioResults = useMemo(() => {
+    const last = studioResults.find((s) => s.id === lastStudioId);
+    return last ? [last, ...studioResults.filter((s) => s !== last)] : studioResults;
+  }, [studioResults, lastStudioId]);
+
   const handleSelectStudio = (studio: AvailableStudio) => {
     setSelectedStudio(studio);
+    preferredStudioIdRef.current = studio.id;
     // 予約に保存するレッスン場所をスタジオ名・住所で埋める
     const locationText = studio.address
       ? `${studio.name}（${studio.address}）`
       : studio.name;
     setFormData((prev) => ({ ...prev, location: locationText }));
     setErrors((prev) => ({ ...prev, location: '', studio: '' }));
+  };
+
+  const handleSelectTravelArea = (ward: string) => {
+    const prevPrefix = travelArea ? `東京都${travelArea}` : '';
+    setTravelArea(ward);
+    setFormData((prev) => {
+      const loc = prev.location.trim();
+      if (!ward) return prev;
+      if (prevPrefix && loc.startsWith(prevPrefix)) {
+        return { ...prev, location: `東京都${ward}${loc.slice(prevPrefix.length)}` };
+      }
+      if (!loc || loc === displayLocationHint) {
+        return { ...prev, location: `東京都${ward}` };
+      }
+      return prev;
+    });
+    setErrors((prev) => ({ ...prev, location: '' }));
   };
 
   const handleChange = (
@@ -750,6 +958,14 @@ const ReservationForm: React.FC = () => {
 
     if (!formData.location.trim()) {
       newErrors.location = 'レッスン場所を入力してください';
+    }
+
+    if (needsTravelArea) {
+      if (!travelArea) {
+        newErrors.location = '出張先の区を選択してください';
+      } else if (!formData.location.includes(travelArea)) {
+        newErrors.location = `レッスン場所の住所に「${travelArea}」を含めてください`;
+      }
     }
 
     if (lessonAmount === null || !Number.isInteger(lessonAmount) || lessonAmount < 50) {
@@ -867,6 +1083,7 @@ const ReservationForm: React.FC = () => {
         ...(couponDiscount > 0 && selectedCouponId
           ? { couponId: selectedCouponId }
           : {}),
+        ...(needsTravelArea && travelArea ? { area: travelArea } : {}),
         ...(isStudioFlow && selectedStudio
           ? {
               studioId: selectedStudio.id,
@@ -890,6 +1107,26 @@ const ReservationForm: React.FC = () => {
 
       if (!data.url) {
         throw new Error('Stripe Checkout のURLが取得できませんでした。');
+      }
+
+      // 次のスタジオ予約で同じ場所から探し、同じスタジオを選んでおけるよう探し方を残す。
+      // 失敗しても予約には影響しないので、決済画面への移動は止めない
+      if (isStudioFlow && selectedStudio) {
+        try {
+          await updateDoc(doc(db, 'users', user.uid), {
+            lastStudioSearch: {
+              mode: studioSearchMode,
+              prefecture: regionPref,
+              city: regionCity,
+              town: regionTown,
+              station: studioSearchMode === 'station' ? selectedStation : null,
+              radiusKm: searchRadiusKm,
+              studioId: selectedStudio.id,
+            },
+          });
+        } catch (error) {
+          console.warn('前回のスタジオの保存に失敗しました:', error);
+        }
       }
 
       window.location.href = data.url;
@@ -935,7 +1172,10 @@ const ReservationForm: React.FC = () => {
             <p><strong>レッスンコース：</strong>{lessonCourse}</p>
             {displayLessonType && <p><strong>レッスン種別：</strong>{displayLessonType}</p>}
             <p><strong>日時：</strong>{selectedDate} {selectedTime}</p>
-            <p><strong>レッスン料：</strong>{lessonAmount?.toLocaleString()}円</p>
+            <p><strong>レッスン料：</strong>{baseLessonAmount?.toLocaleString()}円</p>
+            {areaFee > 0 && (
+              <p><strong>{areaFeeLabel}：</strong>{areaFee.toLocaleString()}円</p>
+            )}
             {isStudioFlow && selectedStudio && (
               <>
                 <p><strong>スタジオ：</strong>{selectedStudio.name}</p>
@@ -1100,6 +1340,17 @@ const ReservationForm: React.FC = () => {
                 className="form-control"
                 disabled
               />
+              {areaFee > 0 && (
+                <p style={{ margin: '6px 0 0', fontSize: '0.9rem' }}>
+                  レッスン料 {baseLessonAmount?.toLocaleString()}円 ＋ {areaFeeLabel}{' '}
+                  {areaFee.toLocaleString()}円
+                </p>
+              )}
+              {needsTravelArea && !travelArea && (
+                <p style={{ margin: '6px 0 0', fontSize: '0.85rem', color: '#666' }}>
+                  出張先の区によって出張費がかかります。下の「レッスン場所」で区を選んでください。
+                </p>
+              )}
               {isStudioFlow && selectedStudio && (
                 <div style={{ marginTop: 8, fontSize: '0.9rem' }}>
                   <p style={{ margin: '2px 0' }}>
@@ -1207,10 +1458,10 @@ const ReservationForm: React.FC = () => {
                   background: '#fafafa',
                 }}
               >
-                <label style={{ fontWeight: 'bold' }}>スタジオを検索して選択</label>
+                <label style={{ fontWeight: 'bold' }}>スタジオを選択</label>
                 <p style={{ fontSize: '0.85rem', color: '#666', margin: '0.25rem 0 0.75rem' }}>
-                  基準にする場所を「住所」か「最寄り駅」で指定すると、そこから近い順に
-                  空きスタジオを表示します。（講師が対応できるエリアのスタジオのみ表示されます）
+                  レッスン日時を選ぶと、下の場所から近い順に空きスタジオを自動で表示します。
+                  場所は「住所」か「最寄り駅」で変えられます。（講師が対応できるエリアのスタジオのみ表示されます）
                 </p>
 
                 {/* 基準地点の指定方法 */}
@@ -1452,7 +1703,7 @@ const ReservationForm: React.FC = () => {
                     disabled={!searchCenter}
                     style={{ width: '100%', marginTop: '0.25rem' }}
                   >
-                    {[3, 5, 10, 20].map((km) => (
+                    {STUDIO_RADIUS_OPTIONS_KM.map((km) => (
                       <option key={km} value={km}>
                         この場所から{km}km以内
                       </option>
@@ -1469,23 +1720,64 @@ const ReservationForm: React.FC = () => {
                   </p>
                 </div>
 
-                <button
-                  type="button"
-                  className="form-button"
-                  onClick={handleSearchStudios}
-                  disabled={studioSearching}
-                  style={{ marginTop: 12 }}
-                >
-                  {studioSearching ? '検索中…' : '空きスタジオを検索'}
-                </button>
-
-                {studioSearchError && (
-                  <p className="error" style={{ marginTop: 8 }}>
-                    {studioSearchError}
+                {!studioSearchReady && (
+                  <p style={{ fontSize: '0.85rem', color: '#666', margin: '12px 0 0' }}>
+                    {!selectedDate || !selectedTime
+                      ? '先にカレンダーからレッスン日時を選択してください。'
+                      : studioSearchMode === 'station'
+                        ? '最寄り駅を検索して選択してください。'
+                        : regionPref
+                          ? '町名を読み込んでいます…'
+                          : '都道府県を選択してください。'}
                   </p>
                 )}
 
-                {studioResults.length > 0 && (
+                {studioSearchReady && studioSearching && (
+                  <p style={{ fontSize: '0.9rem', color: '#666', margin: '12px 0 0' }}>
+                    空きスタジオを探しています…
+                  </p>
+                )}
+
+                {studioSearchError && !studioSearching && (
+                  <div style={{ marginTop: 8 }}>
+                    <p className="error" style={{ margin: 0 }}>
+                      {studioSearchError}
+                    </p>
+                    {studioAlternatives.length === 0 && studioSearchReady && (
+                      <button
+                        type="button"
+                        className="form-button schedule-sub-button"
+                        onClick={() => void searchStudios(++studioSearchSeqRef.current)}
+                        style={{ marginTop: 8 }}
+                      >
+                        もう一度探す
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {studioAlternatives.length > 0 && !studioSearching && (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+                    {studioAlternatives.map((a) => (
+                      <button
+                        key={a.time}
+                        type="button"
+                        className="schedule-time-button"
+                        onClick={() => handleDateTimeSelect(selectedDate, a.time)}
+                      >
+                        {a.time}（空き{a.count}件）
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {studioExpandedRadiusKm !== null && studioResults.length > 0 && !studioSearching && (
+                  <p style={{ fontSize: '0.85rem', color: '#8a6d1f', margin: '12px 0 0' }}>
+                    {searchRadiusKm}km以内には空きが無かったため、{studioExpandedRadiusKm}km以内で探しました。
+                  </p>
+                )}
+
+                {studioResults.length > 0 && !studioSearching && (
                   <div
                     style={{
                       marginTop: 12,
@@ -1494,7 +1786,7 @@ const ReservationForm: React.FC = () => {
                       gap: 8,
                     }}
                   >
-                    {studioResults.map((s) => (
+                    {sortedStudioResults.map((s) => (
                       <label
                         key={s.id}
                         style={{
@@ -1520,6 +1812,21 @@ const ReservationForm: React.FC = () => {
                         />
                         <span>
                           <strong>{s.name}</strong>
+                          {s.id === lastStudioId && (
+                            <span
+                              style={{
+                                marginLeft: 6,
+                                padding: '0 6px',
+                                borderRadius: 4,
+                                fontSize: '0.75rem',
+                                background: '#fff8e9',
+                                border: '1px solid #b8a06a',
+                                color: '#8a6d1f',
+                              }}
+                            >
+                              前回利用
+                            </span>
+                          )}
                           {(typeof s.studentDistanceKm === 'number' ||
                             typeof s.distanceKm === 'number') && (
                             <span style={{ color: '#666', fontSize: '0.85rem' }}>
@@ -1542,6 +1849,11 @@ const ReservationForm: React.FC = () => {
                             </span>
                           )}
                           <span>スタジオ代: {s.pricePerSlot.toLocaleString()}円</span>
+                          {(s.areaFee ?? 0) > 0 && (
+                            <span>
+                              {' '}／ 講師の出張費: {(s.areaFee ?? 0).toLocaleString()}円
+                            </span>
+                          )}
                         </span>
                       </label>
                     ))}
@@ -1615,14 +1927,50 @@ const ReservationForm: React.FC = () => {
                     マイページと前日のリマインドメールでご案内します。
                   </p>
                 </>
+              ) : isHomeFlow ? (
+                <>
+                  <input
+                    type="text"
+                    name="location"
+                    value={formData.location}
+                    className="form-control"
+                    disabled
+                  />
+                  <p style={{ fontSize: '0.85rem', color: '#666', margin: '0.4rem 0 0' }}>
+                    番地・建物名までの詳しいご住所は、ご予約後にお送りする予約受付メールでお知らせします。
+                  </p>
+                </>
               ) : (
-                <input
-                  type="text"
-                  name="location"
-                  value={formData.location}
-                  onChange={handleChange}
-                  className="form-control"
-                />
+                <>
+                  {needsTravelArea && (
+                    <select
+                      className="form-control"
+                      value={travelArea}
+                      onChange={(e) => handleSelectTravelArea(e.target.value)}
+                      style={{ marginBottom: 8 }}
+                    >
+                      <option value="">出張先の区を選択してください</option>
+                      {travelAreaOptions.map(({ ward, fee }) => (
+                        <option key={ward} value={ward}>
+                          {ward}（出張費 {fee > 0 ? `${fee.toLocaleString()}円` : 'なし'}）
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <input
+                    type="text"
+                    name="location"
+                    value={formData.location}
+                    onChange={handleChange}
+                    className="form-control"
+                  />
+                  {needsTravelArea && (
+                    <p style={{ fontSize: '0.85rem', color: '#666', margin: '0.4rem 0 0' }}>
+                      この講師が出張できるのは、上の一覧にある区だけです。
+                      番地・建物名までご入力ください。
+                    </p>
+                  )}
+                </>
               )}
               {errors.location && <p className="error">{errors.location}</p>}
             </div>

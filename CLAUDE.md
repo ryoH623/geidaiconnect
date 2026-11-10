@@ -60,16 +60,43 @@ firebase deploy --only functions   # デプロイ（predeploy で lint と build
 - 退会者のメールアドレスはハッシュで `deletedEmails` に残し、再登録時の紹介特典を止める（[functions/src/deletedEmails.ts](functions/src/deletedEmails.ts)）。
 - 仕様と運用手順は [docs/account-deletion.md](docs/account-deletion.md)。
 
+### 講師都合のキャンセル
+
+- `/teacher/reservations` から講師が理由を入れてキャンセルする（callable `teacherCancelReservation`）。レッスン開始時刻まで可能。
+- 生徒の負担はゼロ。請求前は与信取消、請求後（当日0時の capture 後）は Stripe で全額返金し、クーポンは戻す。枠は再予約されないよう `closed` にする。
+- 返金して戻らない Stripe の決済手数料は講師負担。`teacherCancellations/{予約ID}` に `stripeFee` を記録し、運営が月末精算で差し引いて `/admin/teachers/:id` で「精算済み」にする。
+- Stripe 側の処理に失敗しても予約はキャンセルし、`paymentStatus: "refund_failed"` にして運営へメールする（Stripe の管理画面で手動返金）。
+- 運営による取り消しは `/admin/reservations/:id`（callable `adminCancelReservation`）。生徒の負担ゼロは同じだが、戻らない決済手数料は運営負担（`teacherCancellations` には記録しない）。与信取消・返金の処理は `voidOrRefundReservation()` を共用する。
+
+### 区ごとの出張費（東京23区）
+
+- 講師は `/teacher/profile` で「基本のレッスン料＋区ごとの出張費」を設定できる（`teacherProfiles.areaFees`、`{ 区名: 円 }`）。対象は出張とスタジオのレッスンで、出張は生徒が予約フォームで選んだ区、スタジオはスタジオの所在区（`studios.city`、東京都のみ）で決まる。
+- `areaFees` が空なら機能は使っていない扱いで出張費 0 円。1件でもあれば、設定した区だけが対応エリアになる（スタジオ検索からも外れる）。
+- `createReservationAndCheckout` はレッスン料をサーバーで照合する（コース料金＋出張費と一致しなければ拒否）。フロントの金額や URL の price は信用しない。予約には `lessonAmount`（出張費込み）、`baseLessonAmount`、`area`、`areaFee` を保存する。
+- 出張費は運営手数料の対象外。手数料 = `baseLessonAmount` × 率、講師取り分 = `lessonAmount` − 手数料（`reservationPayouts` にも `areaFee` を残す。運営画面の集計は `commissionBaseOf()` を使う）。
+- 講師の入力補助として「距離から自動で入れる」がある（プロフィール編集画面のみ・段階は保存しない）。起点は講師の市区町村＋町名の代表座標、終点は区役所の位置（[src/data/tokyoWards.ts](src/data/tokyoWards.ts)）で、直線距離の段階ごとに金額を入れる。入れた金額は講師が区ごとに直せる。
+- 23区の一覧と判定は [functions/src/areaFees.ts](functions/src/areaFees.ts) と [src/lib/teacherProfiles.ts](src/lib/teacherProfiles.ts) の両方にある。片方を変えたらもう片方も揃えること。
+
+### スタジオ予約（生徒の検索）
+
+- 予約フォームはレッスン日時と場所がそろうと `getAvailableStudios` を自動で呼ぶ（検索ボタンはない）。場所の初期値は `users/{uid}.lastStudioSearch`（前回のスタジオ予約時の探し方。決済画面へ移る直前にフロントが保存）、無ければ会員情報の都道府県・市区町村。前回のスタジオに空きがあれば一覧の先頭に出して選んでおく。
+- `getAvailableStudios` は指定の半径で0件なら 3→5→10→20km の段階で自動で広げ（`expandedRadiusKm`）、それでも0件なら同じ日の講師の別の空き枠（スタジオ可）で探して `alternatives` を返す。外部カレンダー照会を増やしすぎないよう、外側の段階・別の時間は必要なときだけ、件数も絞って調べる。
+
+### 月末精算
+
+- `/admin/settlements` で月・講師ごとに「講師取り分 − 未精算の講師都合キャンセル手数料 = 振込額」を出し、CSV に書き出す。
+- 「振込済みにする」で `teacherSettlements/{講師UID_YYYY-MM}` を作り、差し引いた `teacherCancellations` に `settled` と `settlementId` を付ける（フロントから batch で書く）。
+
 ### Cloud Functions（functions/src/index.ts ＋ campaigns.ts）
 
 - firebase-functions **v1 API**（`firebase-functions/v1`）を使用。リージョンは `us-central1`（フロントの `getFunctions(app, "us-central1")` と一致させること）。
 - 環境変数は `defineString()` パラメータで定義: SMTP_*, APP_URL, STRIPE_SECRET_KEY, STRIPE_SUCCESS_URL, STRIPE_CANCEL_URL, STRIPE_WEBHOOK_SECRET。
-- エクスポート（onCall/onRequest）: `sendVerifyEmail`, `resendVerifyEmail`, `createCheckoutSession`, `getAvailableStudios`, `createReservationAndCheckout`, `getReservationForSuccess`, `stripeWebhook`, `cancelReservation`, `rescheduleReservation`, `setMeetingUrl`, `submitContact`, `submitRequest`, `submitTeacherApplication`, `studioAdminHttp`, `submitReview`, `getMyReferralCode`, `checkReferralCode`, `applyReferralCode`, `adminIssueCoupon`, `adminCancelCoupon`, `adminSetReferralBlocked`, `checkMyAccountDeletion`, `deleteMyAccount`, `adminDeleteUser`, `logSearch`。
-- スケジュール実行（pubsub）: `sendLessonReminders`（レッスン前リマインド）, `releaseExpiredHolds`（期限切れ pending の枠解放）, `captureDueAuthorizations`（締切を過ぎたカード与信のキャプチャ）, `finalizeCompletedLessons`（レッスン完了の確定と紹介特典の判定）, `expireCoupons`（期限切れクーポンの整理）, `purgeOldSearchLogs`（保持期間を過ぎた検索ログの削除）。
+- エクスポート（onCall/onRequest）: `sendVerifyEmail`, `resendVerifyEmail`, `createCheckoutSession`, `getAvailableStudios`, `createReservationAndCheckout`, `getReservationForSuccess`, `stripeWebhook`, `cancelReservation`, `teacherCancelReservation`, `adminCancelReservation`, `rescheduleReservation`, `setMeetingUrl`, `submitContact`, `submitRequest`, `submitTeacherApplication`, `studioAdminHttp`, `submitReview`, `getMyReferralCode`, `checkReferralCode`, `applyReferralCode`, `adminIssueCoupon`, `adminCancelCoupon`, `adminSetReferralBlocked`, `checkMyAccountDeletion`, `deleteMyAccount`, `adminDeleteUser`, `logSearch`。
+- スケジュール実行（pubsub）: `sendLessonReminders`（レッスン前リマインド）, `releaseExpiredHolds`（期限切れ pending の枠解放）, `captureDueAuthorizations`（締切を過ぎたカード与信のキャプチャ）, `finalizeCompletedLessons`（レッスン完了の確定・紹介特典の判定・生徒へのレビュー依頼メール）, `expireCoupons`（期限切れクーポンの整理）, `purgeOldSearchLogs`（保持期間を過ぎた検索ログの削除）。
 
 ### Firestore
 
-主なコレクション: `users`（本人のみ read/write・削除は Functions のみ）, `reservations`（削除禁止）, `reviews`（作成は Functions のみ）, `schedules`（read は公開）, `coupons`（本人のみ read）, `couponGrants` / `referralCodes`（admin のみ read）, `referrals`（紹介者・被紹介者が read）, `searchLogs`（read は admin のみ・書き込みは Functions のみ）, `accountDeletions` / `deletedEmails`（admin のみ read・書き込みは Functions のみ）。ルールは [firestore.rules](firestore.rules)。
+主なコレクション: `users`（本人のみ read/write・削除は Functions のみ）, `reservations`（削除禁止）, `reviews`（作成は Functions のみ）, `schedules`（read は公開）, `coupons`（本人のみ read）, `couponGrants` / `referralCodes`（admin のみ read）, `referrals`（紹介者・被紹介者が read）, `searchLogs`（read は admin のみ・書き込みは Functions のみ）, `accountDeletions` / `deletedEmails`（admin のみ read・書き込みは Functions のみ）, `teacherCancellations`（講師本人と admin が read・作成は Functions のみ・admin は精算済みの印だけ更新可）, `teacherSettlements`（講師本人と admin が read・admin が作成）。ルールは [firestore.rules](firestore.rules)。
 
 ### フロントエンド構成
 

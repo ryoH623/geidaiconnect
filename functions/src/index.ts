@@ -3,6 +3,7 @@ import { auth as v1auth, https, logger, pubsub } from "firebase-functions/v1";
 import { defineString } from "firebase-functions/params";
 import type { Response } from "express";
 import { google } from "googleapis";
+import { AREA_FEE_LESSON_TYPES, areaFeeFor, readAreaFees } from "./areaFees";
 
 import {
   COUPON_ON_CANCEL,
@@ -11,6 +12,7 @@ import {
   releaseCoupon,
   reserveCouponInTx,
   restoreUsedCoupon,
+  requireAdmin,
   type CancelInitiator,
 } from "./campaigns";
 
@@ -57,7 +59,6 @@ export {
 // ========================================
 // Environment variables
 // ========================================
-const APP_URL = defineString("APP_URL");
 
 // メール送信の共通基盤は mailer.ts にある（teacherInvites.ts からも使うため）
 import {
@@ -69,6 +70,7 @@ import {
   escapeHtml,
   sendMailSafe,
   buildInfoMailHtml,
+  APP_URL,
 } from "./mailer";
 
 // お問い合わせフォームの通知先（運営宛）
@@ -293,10 +295,14 @@ async function teacherHomeAddressOf(teacherUid: string): Promise<string> {
 }
 
 /**
- * 決済完了時の通知メール（生徒: 予約確定 / 講師: 新規予約）。
- * Webhook から呼ぶため、失敗しても throw しない。
+ * 予約の通知メール（生徒・講師の両方）。Webhook やスケジュール実行から呼ぶため、失敗しても throw しない。
+ * - accepted: カードの与信が取れた時点（予約受付）。予約した直後に届くのはこちら。
+ * - paid: 請求が確定した時点。カード予約ではレッスン当日0時の capture 時になる。
  */
-async function sendPaymentCompletedEmails(reservationId: string): Promise<void> {
+async function sendPaymentCompletedEmails(
+  reservationId: string,
+  stage: "accepted" | "paid" = "paid"
+): Promise<void> {
   try {
     const snap = await admin
       .firestore()
@@ -347,13 +353,23 @@ async function sendPaymentCompletedEmails(reservationId: string): Promise<void> 
 
       await sendMailSafe({
         to: studentEmail,
-        subject: "【Geidai Connect】ご予約が確定しました",
+        subject:
+          stage === "accepted"
+            ? "【Geidai Connect】ご予約を受け付けました"
+            : "【Geidai Connect】お支払いが確定しました",
         html: buildInfoMailHtml({
           greetingName: String(r.name || "ご利用者"),
-          intro: [
-            "お支払いが完了し、レッスンのご予約が確定しました。",
-            "ご予約内容は以下のとおりです。",
-          ],
+          intro:
+            stage === "accepted"
+              ? [
+                  "レッスンのご予約を受け付けました。",
+                  "現時点ではカードのお支払い枠を確保しただけで、請求は発生していません。レッスン前日23:59を過ぎるとお支払いが確定します（それまでのキャンセルは請求されません）。",
+                  "ご予約内容は以下のとおりです。",
+                ]
+              : [
+                  "レッスンのお支払いが確定しました。",
+                  "ご予約内容は以下のとおりです。",
+                ],
           rows: studentRows,
           outro: [
             "レッスン当日はどうぞよろしくお願いいたします。",
@@ -373,10 +389,19 @@ async function sendPaymentCompletedEmails(reservationId: string): Promise<void> 
       if (teacher.email) {
         await sendMailSafe({
           to: teacher.email,
-          subject: "【Geidai Connect】新しい予約が入りました",
+          subject:
+            stage === "accepted"
+              ? "【Geidai Connect】新しい予約が入りました"
+              : "【Geidai Connect】予約のお支払いが確定しました",
           html: buildInfoMailHtml({
             greetingName: teacher.displayName || String(r.teacherName || "講師"),
-            intro: ["新しいレッスン予約が確定しました（お支払い完了済み）。"],
+            intro:
+              stage === "accepted"
+                ? [
+                    "新しいレッスン予約が入りました。",
+                    "生徒のお支払いはレッスン前日23:59を過ぎた時点で確定します。",
+                  ]
+                : ["以下の予約のお支払いが確定しました。"],
             rows: [
               ...reservationRows(r),
               ["生徒氏名", String(r.name ?? "")],
@@ -464,6 +489,8 @@ type CreateReservationAndCheckoutData = {
   // 利用するクーポン。値引き額はサーバー側で再計算するため、
   // フロントから割引後の金額を受け取ることはしない。
   couponId?: string;
+  // 出張レッスンの出張先の区（区ごとの出張費を設定している講師のみ）
+  area?: string;
 };
 
 type CreateReservationAndCheckoutResult = {
@@ -625,6 +652,67 @@ async function isStudioFreeExternal(
   }
 }
 
+/** 講師プロフィール（teacherProfiles）を Auth の UID から引く。無ければ null */
+async function loadTeacherProfileByUid(
+  teacherId: string
+): Promise<FirebaseFirestore.DocumentData | null> {
+  const snap = await admin
+    .firestore()
+    .collection("teacherProfiles")
+    .where("authUid", "==", teacherId)
+    .limit(1)
+    .get();
+  return snap.empty ? null : snap.docs[0].data() || null;
+}
+
+/** 自動追加されるオンラインコース（フロントの getCourses と揃えること） */
+const ONLINE_COURSE_TITLE = "オンラインレッスン（60分）";
+const DEFAULT_ONLINE_LESSON_PRICE = 5000;
+
+/**
+ * コース名から、そのコースのレッスン方法と基本料金を求める。
+ * フロントの getCourses（src/lib/teacherProfiles.ts）と同じ規則で、
+ * オンライン対応の講師にはオンラインコースを足して探す。
+ */
+function findTeacherCourse(
+  profile: FirebaseFirestore.DocumentData,
+  title: string
+): { type: string; price: number } | null {
+  const courses = Array.isArray(profile.courses) ? profile.courses : [];
+  const toPrice = (v: unknown): number =>
+    typeof v === "number"
+      ? v
+      : parseInt(String(v ?? "").replace(/[^0-9]/g, ""), 10) || 0;
+
+  const hit = courses.find(
+    (c: Record<string, unknown>) => c && c.title === title
+  ) as Record<string, unknown> | undefined;
+  if (hit) {
+    return { type: String(hit.type || "自宅"), price: toPrice(hit.price) };
+  }
+
+  const hasOnline = courses.some(
+    (c: Record<string, unknown>) => c && c.type === "オンライン"
+  );
+  if (profile.onlineAvailable === true && !hasOnline && title === ONLINE_COURSE_TITLE) {
+    return {
+      type: "オンライン",
+      price:
+        typeof profile.onlineLessonPrice === "number" && profile.onlineLessonPrice > 0
+          ? profile.onlineLessonPrice
+          : DEFAULT_ONLINE_LESSON_PRICE,
+    };
+  }
+  return null;
+}
+
+/** スタジオの所在区。出張費の判定に使うため、東京都のスタジオだけ区名を返す */
+function studioWard(studio: FirebaseFirestore.DocumentData): string {
+  return studio.prefecture === "東京都" && typeof studio.city === "string"
+    ? studio.city
+    : "";
+}
+
 /** 講師の users ドキュメントから拠点・移動可能距離を読む */
 async function loadTeacherTravelBase(
   teacherId: string
@@ -665,6 +753,8 @@ type AvailableStudioItem = {
   distanceKm: number | null;
   /** 生徒が選択した町名からの直線距離(km)。座標未指定時は null */
   studentDistanceKm: number | null;
+  /** スタジオの所在区に対する講師の出張費（区ごとの設定が無い講師は 0） */
+  areaFee: number;
 };
 
 /** 生徒座標として妥当か（有限数かつ日本近辺の範囲内） */
@@ -684,7 +774,85 @@ function isValidStudentCoords(lat: unknown, lng: unknown): boolean {
 type GetAvailableStudiosResult = {
   ok: boolean;
   studios: AvailableStudioItem[];
+  /** 指定の半径では空きが無く、自動で広げて見つけたときの半径(km) */
+  expandedRadiusKm?: number;
+  /** 空きが無いとき、同じ日の別の時間で空きスタジオがある時間と件数 */
+  alternatives?: { time: string; count: number }[];
 };
+
+/** 0件のときに自動で広げる検索半径の段階(km)。フロントの選択肢と揃える */
+const STUDIO_RADIUS_STEPS_KM = [3, 5, 10, 20];
+/** 0件のときに空きを確かめる、同じ日の別の時間の数（外部カレンダー照会を増やしすぎない） */
+const MAX_ALTERNATIVE_TIMES_CHECKED = 4;
+/** 生徒に提案する別の時間の数 */
+const MAX_ALTERNATIVE_TIMES = 3;
+
+/** 空き確認の前段（場所・講師の対応エリア）を通ったスタジオ候補 */
+type StudioCandidate = {
+  id: string;
+  data: FirebaseFirestore.DocumentData;
+  /** 講師拠点からの距離(km)。拠点未設定なら null */
+  distanceKm: number | null;
+  /** 生徒の基準地点からの距離(km)。座標未指定なら null */
+  studentDistanceKm: number | null;
+  areaFee: number;
+};
+
+function roundKm(km: number | null): number | null {
+  return km === null ? null : Math.round(km * 10) / 10;
+}
+
+function toAvailableStudioItem(c: StudioCandidate): AvailableStudioItem {
+  return {
+    id: c.id,
+    name: typeof c.data.name === "string" ? c.data.name : c.id,
+    address: typeof c.data.address === "string" ? c.data.address : undefined,
+    pricePerSlot:
+      typeof c.data.pricePerSlot === "number" ? c.data.pricePerSlot : 0,
+    distanceKm: roundKm(c.distanceKm),
+    studentDistanceKm: roundKm(c.studentDistanceKm),
+    areaFee: c.areaFee,
+  };
+}
+
+/**
+ * 講師の同じ日の空き枠のうち、スタジオで受けられる別の時間を近い順に返す。
+ * 過去の時間と、指定した時間そのものは除く。
+ */
+async function loadTeacherStudioTimesOfDay(
+  teacherId: string,
+  date: string,
+  exceptTime: string,
+  now: Date
+): Promise<string[]> {
+  // 複合インデックスを避けるため teacherId の等価条件だけで引き、日付はメモリ上で絞る
+  const snap = await admin
+    .firestore()
+    .collection("schedules")
+    .where("teacherId", "==", teacherId)
+    .get();
+
+  const base = timeToMin(exceptTime);
+  const times: string[] = [];
+  for (const doc of snap.docs) {
+    const s = doc.data() || {};
+    if (s.date !== date || typeof s.time !== "string" || s.time === exceptTime) {
+      continue;
+    }
+    if (s.reserved === true || s.isAvailable === false) continue;
+    const st = String(s.status || "").toLowerCase();
+    if (UNAVAILABLE_STATUSES.has(st) && !isPendingExpired(s, now)) continue;
+    // lessonMethods が空・未設定の古い枠は全方法を受け付ける扱い（予約作成時の検証と同じ）
+    const methods = Array.isArray(s.lessonMethods) ? s.lessonMethods : [];
+    if (methods.length > 0 && !methods.includes("スタジオ")) continue;
+    if (new Date(`${date}T${s.time}:00+09:00`).getTime() <= now.getTime()) continue;
+    times.push(s.time);
+  }
+
+  return Array.from(new Set(times)).sort(
+    (a, b) => Math.abs(timeToMin(a) - base) - Math.abs(timeToMin(b) - base)
+  );
+}
 
 function addMinutesToDate(date: Date, minutes: number): Date {
   return new Date(date.getTime() + minutes * 60 * 1000);
@@ -1206,6 +1374,10 @@ export const getAvailableStudios = https.onCall(
     });
 
     const base = await loadTeacherTravelBase(teacherId);
+    // 区ごとの出張費。設定のある講師は、設定した区のスタジオだけを候補にする
+    const areaFees = readAreaFees(
+      (await loadTeacherProfileByUid(teacherId))?.areaFees
+    );
 
     // 移動バッファ判定: この日の講師の他予約と、候補レッスンの開始・終了時刻
     const durationMin =
@@ -1225,9 +1397,18 @@ export const getAvailableStudios = https.onCall(
       ? studiosRef.get()
       : studiosRef.where("prefecture", "==", prefecture).get());
 
-    const results: AvailableStudioItem[] = [];
     const now = new Date();
 
+    // 0件のときに自動で広げる段階。指定の半径より広い段階だけを使う
+    const radiusSteps =
+      radiusKm === null
+        ? []
+        : [radiusKm, ...STUDIO_RADIUS_STEPS_KM.filter((km) => km > radiusKm)];
+    const maxRadiusKm =
+      radiusSteps.length > 0 ? radiusSteps[radiusSteps.length - 1] : null;
+
+    // ── 前段: 時間に関係なく決まる条件（場所・講師の到達可否・対応エリア）で絞る ──
+    const candidates: StudioCandidate[] = [];
     for (const doc of snap.docs) {
       const s = doc.data() || {};
       const studioId = typeof s.id === "string" && s.id ? s.id : doc.id;
@@ -1236,14 +1417,14 @@ export const getAvailableStudios = https.onCall(
       if (typeof s.lat !== "number" || typeof s.lng !== "number") continue;
 
       // 生徒が指定した基準地点（町名の代表座標または駅）からの直線距離
-      const studentDistanceRawKm = hasStudentCoords
+      const studentDistanceKm = hasStudentCoords
         ? haversineKm(studentLat as number, studentLng as number, s.lat, s.lng)
         : null;
 
-      // 0) 生徒からの距離で絞り込む。半径指定がない場合のみ市区町村の一致で絞る
-      //    （市区町村の完全一致だけだと、区が違うだけの最寄りスタジオが落ちてしまうため）
-      if (radiusKm !== null) {
-        if (studentDistanceRawKm === null || studentDistanceRawKm > radiusKm) {
+      // 0) 生徒からの距離で絞り込む（自動で広げる最大の半径まで）。半径指定がない場合のみ
+      //    市区町村の一致で絞る（完全一致だけだと、区が違うだけの最寄りスタジオが落ちるため）
+      if (maxRadiusKm !== null) {
+        if (studentDistanceKm === null || studentDistanceKm > maxRadiusKm) {
           continue;
         }
       } else if (city && s.city !== city) {
@@ -1257,72 +1438,131 @@ export const getAvailableStudios = https.onCall(
       });
       if (!reachable) continue;
 
+      // 1.5) 講師の対応エリア（区ごとの出張費の設定）
+      const areaFee = areaFeeFor(areaFees, studioWard(s));
+      if (areaFee === null) continue;
+
+      candidates.push({ id: studioId, data: s, distanceKm, studentDistanceKm, areaFee });
+    }
+
+    // 近い順に並べる（距離不明は末尾）。生徒座標があれば生徒基準、なければ講師拠点基準
+    const kmOf = (c: StudioCandidate) =>
+      hasStudentCoords ? c.studentDistanceKm : c.distanceKm;
+    candidates.sort((a, b) => {
+      const aKm = kmOf(a);
+      const bKm = kmOf(b);
+      if (aKm === null) return bKm === null ? 0 : 1;
+      if (bKm === null) return -1;
+      return aKm - bKm;
+    });
+
+    // ── 後段: 指定の時間にそのスタジオが空いていて、講師の移動も間に合うか ──
+    const isFreeAt = async (c: StudioCandidate, t: string): Promise<boolean> => {
       // 2) 自アプリ内ロック（決定的ドキュメント ID を直読み）
-      const bookingDocId = buildStudioBookingDocId(studioId, date, time);
       const bookingSnap = await admin
         .firestore()
         .collection("studioBookings")
-        .doc(bookingDocId)
+        .doc(buildStudioBookingDocId(c.id, date, t))
         .get();
       if (bookingSnap.exists) {
         const b = bookingSnap.data() || {};
         const st = String(b.status || "").toLowerCase();
         // 期限切れの pending（決済未完了のまま放置された仮押さえ）は空き扱い
         if (UNAVAILABLE_STATUSES.has(st) && !isPendingExpired(b, now)) {
-          continue;
+          return false;
         }
       }
 
       // 3) 外部（Google カレンダー）空き
       const free = await isStudioFreeExternal(
-        typeof s.calendarId === "string" ? s.calendarId : "",
+        typeof c.data.calendarId === "string" ? c.data.calendarId : "",
         date,
-        time
+        t
       );
-      if (!free) continue;
+      if (!free) return false;
 
-      // 4) 同日の前後予約から、このスタジオへ移動が間に合うか（間に合わなければ除外）
-      if (Number.isFinite(candStart) && dayBookings.length > 0) {
+      // 4) 同日の前後予約から、このスタジオへ移動が間に合うか
+      const start = timeToMin(t);
+      if (Number.isFinite(start) && dayBookings.length > 0) {
         const candBooking: DayBooking = {
-          start: candStart,
-          end: candStart + durationMin,
-          loc: { lat: s.lat, lng: s.lng, key: `studio:${studioId}` },
+          start,
+          end: start + durationMin,
+          loc: { lat: c.data.lat, lng: c.data.lng, key: `studio:${c.id}` },
         };
-        if (findScheduleConflict(candBooking, dayBookings)) continue;
+        if (findScheduleConflict(candBooking, dayBookings)) return false;
       }
+      return true;
+    };
 
-      const studentDistanceKm =
-        studentDistanceRawKm === null
-          ? null
-          : Math.round(studentDistanceRawKm * 10) / 10;
+    const freeAmong = async (
+      list: StudioCandidate[],
+      t: string
+    ): Promise<StudioCandidate[]> => {
+      const flags = await Promise.all(list.map((c) => isFreeAt(c, t)));
+      return list.filter((_, i) => flags[i]);
+    };
 
-      results.push({
-        id: studioId,
-        name: typeof s.name === "string" ? s.name : studioId,
-        address: typeof s.address === "string" ? s.address : undefined,
-        pricePerSlot:
-          typeof s.pricePerSlot === "number" ? s.pricePerSlot : 0,
-        distanceKm:
-          distanceKm === null ? null : Math.round(distanceKm * 10) / 10,
-        studentDistanceKm,
-      });
+    // 指定の半径で0件なら、段階ごとに広げて最初に見つかった範囲までを返す。
+    // 外側の段階は内側で見つからなかったときだけ照会する（外部カレンダー照会を減らすため）
+    let results: StudioCandidate[] = [];
+    let usedRadiusKm = radiusKm;
+    if (radiusKm === null) {
+      results = await freeAmong(candidates, time);
+    } else {
+      let innerKm = -1;
+      for (const stepKm of radiusSteps) {
+        const ring = candidates.filter(
+          (c) =>
+            (c.studentDistanceKm as number) > innerKm &&
+            (c.studentDistanceKm as number) <= stepKm
+        );
+        results.push(...(await freeAmong(ring, time)));
+        usedRadiusKm = stepKm;
+        innerKm = stepKm;
+        if (results.length > 0) break;
+      }
     }
 
-    // 近い順に並べる（距離不明は末尾）。生徒座標があれば生徒基準、なければ講師拠点基準
-    results.sort((a, b) => {
-      const aKm = hasStudentCoords ? a.studentDistanceKm : a.distanceKm;
-      const bKm = hasStudentCoords ? b.studentDistanceKm : b.distanceKm;
-      if (aKm === null) return bKm === null ? 0 : 1;
-      if (bKm === null) return -1;
-      return aKm - bKm;
-    });
+    // それでも0件なら、同じ日の講師の別の空き時間で探して提案する
+    let alternatives: { time: string; count: number }[] = [];
+    if (results.length === 0 && candidates.length > 0) {
+      const pool =
+        usedRadiusKm === null
+          ? candidates
+          : candidates.filter(
+              (c) => (c.studentDistanceKm as number) <= (usedRadiusKm as number)
+            );
+      const times = (
+        await loadTeacherStudioTimesOfDay(teacherId, date, time, now)
+      ).slice(0, MAX_ALTERNATIVE_TIMES_CHECKED);
+      const counts = await Promise.all(
+        times.map(async (t) => (await freeAmong(pool, t)).length)
+      );
+      alternatives = times
+        .map((t, i) => ({ time: t, count: counts[i] }))
+        .filter((a) => a.count > 0)
+        .slice(0, MAX_ALTERNATIVE_TIMES)
+        .sort((a, b) => timeToMin(a.time) - timeToMin(b.time));
+    }
+
+    const expandedRadiusKm =
+      results.length > 0 && radiusKm !== null && usedRadiusKm !== radiusKm
+        ? (usedRadiusKm as number)
+        : undefined;
 
     logger.info("getAvailableStudios result", {
       teacherId,
       count: results.length,
+      expandedRadiusKm,
+      alternatives,
     });
 
-    return { ok: true, studios: results };
+    return {
+      ok: true,
+      studios: results.map(toAvailableStudioItem),
+      ...(expandedRadiusKm !== undefined ? { expandedRadiusKm } : {}),
+      ...(alternatives.length > 0 ? { alternatives } : {}),
+    };
   }
 );
 
@@ -1410,6 +1650,7 @@ export const createReservationAndCheckout = https.onCall(
         studentLng,
         studioId = "",
         couponId: couponIdRaw = "",
+        area: areaRaw = "",
       } = data || ({} as CreateReservationAndCheckoutData);
 
       const couponId = typeof couponIdRaw === "string" ? couponIdRaw.trim() : "";
@@ -1474,6 +1715,7 @@ export const createReservationAndCheckout = https.onCall(
       let studioBookingDocId = "";
       let studioLat: number | undefined;
       let studioLng: number | undefined;
+      let studioCity = "";
       if (studioId) {
         const studioSnap = await admin
           .firestore()
@@ -1496,6 +1738,7 @@ export const createReservationAndCheckout = https.onCall(
         studioBookingDocId = buildStudioBookingDocId(studioId, date, time);
         studioLat = typeof studio.lat === "number" ? studio.lat : undefined;
         studioLng = typeof studio.lng === "number" ? studio.lng : undefined;
+        studioCity = studioWard(studio);
 
         // 到達可否の再検証（拠点未設定なら reachable 扱い）
         const base = await loadTeacherTravelBase(teacherId);
@@ -1522,6 +1765,81 @@ export const createReservationAndCheckout = https.onCall(
             "選択したスタジオはこの時間帯に空きがありません。"
           );
         }
+      }
+
+      // レッスン料をサーバー側で照合する。金額は予約ページの URL や画面から届くため、
+      // 講師プロフィールの「コース料金＋区ごとの出張費」と一致しなければ受け付けない。
+      const teacherProfile = await loadTeacherProfileByUid(teacherId);
+      if (!teacherProfile || teacherProfile.published !== true) {
+        throw new https.HttpsError("not-found", "講師が見つかりませんでした。");
+      }
+      const course = findTeacherCourse(teacherProfile, lessonCourse);
+      if (!course) {
+        throw new https.HttpsError(
+          "failed-precondition",
+          "選択したコースが見つかりませんでした。講師ページからやり直してください。"
+        );
+      }
+      if (lessonType && lessonType !== course.type) {
+        throw new https.HttpsError(
+          "invalid-argument",
+          "レッスン方法がコースの内容と一致しません。"
+        );
+      }
+
+      // 区ごとの出張費。出張は生徒が選んだ区、スタジオはスタジオの所在区で決まる。
+      let area = "";
+      let areaFee = 0;
+      const areaFees = readAreaFees(teacherProfile.areaFees);
+      if (
+        AREA_FEE_LESSON_TYPES.includes(course.type) &&
+        Object.keys(areaFees).length > 0
+      ) {
+        area =
+          course.type === "スタジオ"
+            ? studioCity
+            : typeof areaRaw === "string"
+              ? areaRaw.trim()
+              : "";
+        if (!area) {
+          throw new https.HttpsError(
+            "invalid-argument",
+            course.type === "スタジオ"
+              ? "講師の対応エリアのスタジオを選択してください。"
+              : "出張先の区を選択してください。"
+          );
+        }
+        const fee = areaFeeFor(areaFees, area);
+        if (fee === null) {
+          throw new https.HttpsError(
+            "failed-precondition",
+            `${area}は講師の対応エリア外です。`
+          );
+        }
+        // 安い区を選んで別の区へ呼ぶことを防ぐため、住所に区名を含めてもらう
+        if (course.type === "出張" && !location.includes(area)) {
+          throw new https.HttpsError(
+            "invalid-argument",
+            `レッスン場所の住所に「${area}」を含めてください。`
+          );
+        }
+        areaFee = fee;
+      }
+
+      const baseLessonAmount = course.price;
+      if (lessonAmount !== baseLessonAmount + areaFee) {
+        logger.warn("createReservationAndCheckout: 料金が講師の設定と一致しません", {
+          teacherId,
+          lessonCourse,
+          lessonAmount,
+          baseLessonAmount,
+          area,
+          areaFee,
+        });
+        throw new https.HttpsError(
+          "failed-precondition",
+          "料金が変更されています。ページを再読み込みしてから、もう一度お試しください。"
+        );
       }
 
       // 金額の組み立て順:
@@ -1586,7 +1904,8 @@ export const createReservationAndCheckout = https.onCall(
       const commissionRate = commissionRateFor(priorLessonCount);
       // 手数料は「クーポン値引き前のレッスン料」に対して計算する。
       // クーポンは運営が負担する販促費であり、講師の取り分を減らさない。
-      const commissionAmount = Math.floor(lessonAmount * commissionRate);
+      // 出張費は講師の移動の実費なので手数料の対象外（全額を講師の取り分に入れる）。
+      const commissionAmount = Math.floor(baseLessonAmount * commissionRate);
       const teacherPayout = lessonAmount - commissionAmount;
 
       // クーポン。値引き額と利用可否はトランザクション内で確定する。
@@ -1809,7 +2128,11 @@ export const createReservationAndCheckout = https.onCall(
           teacherName,
           teacherEmail,
           lessonCourse,
+          // lessonAmount は出張費を含むレッスン料。手数料は出張費を除いた額に対して計算する
           lessonAmount,
+          baseLessonAmount,
+          area: area || null,
+          areaFee,
           lessonDate: date,
           lessonTime: time,
           scheduleDocId,
@@ -1859,6 +2182,8 @@ export const createReservationAndCheckout = https.onCall(
           reservationId,
           teacherId,
           lessonAmount,
+          // 出張費は手数料の対象外。手数料 = (lessonAmount - areaFee) × 率
+          areaFee,
           commissionRate,
           commissionAmount,
           teacherPayout,
@@ -1898,7 +2223,7 @@ export const createReservationAndCheckout = https.onCall(
           quantity: 1,
           price_data: {
             currency: "jpy",
-            unit_amount: lessonAmount,
+            unit_amount: baseLessonAmount,
             product_data: {
               name: "Geidai Connect レッスン予約",
               description: `${teacherName} / ${lessonCourse} / ${date} ${time}`,
@@ -1906,6 +2231,21 @@ export const createReservationAndCheckout = https.onCall(
           },
         },
       ];
+
+      // 区ごとの出張費を 2 明細目として合算
+      if (areaFee > 0) {
+        lineItems.push({
+          quantity: 1,
+          price_data: {
+            currency: "jpy",
+            unit_amount: areaFee,
+            product_data: {
+              name: "出張費",
+              description: `${area} / ${date} ${time}`,
+            },
+          },
+        });
+      }
 
       // スタジオ代を 2 明細目として合算
       if (studioId && studioFee > 0) {
@@ -2314,7 +2654,7 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
         .collection("reservations")
         .doc(reservationId);
 
-      const isFirstPaid = await admin
+      const firstEmail = await admin
         .firestore()
         .runTransaction(async (tx) => {
         // Stripe のイベント再送でメールが重複しないよう、初回遷移かどうかを判定する。
@@ -2326,8 +2666,13 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
         const isCardAuth = prev.paymentMethod === "card";
         const alreadyFinal =
           prev.paymentStatus === "paid" || prev.paymentStatus === "authorized";
-        // カードは capture 時に送るため、ここで送るのは paymentMethod 未設定の旧予約のみ。
-        const shouldSendPaidEmail = !alreadyFinal && !isCardAuth;
+        // カードはここで「予約受付」メールを送り、請求確定のメールは capture 時に送る。
+        // paymentMethod 未設定の旧予約は、ここで決済確定メールを送る。
+        const emailStage: "accepted" | "paid" | null = alreadyFinal
+          ? null
+          : isCardAuth
+            ? "accepted"
+            : "paid";
 
         const stripePaymentIntentId =
           typeof session.payment_intent === "string"
@@ -2343,6 +2688,7 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
                 paymentProvider: "stripe",
                 stripeSessionId: session.id,
                 stripePaymentIntentId,
+                stripeLivemode: event.livemode,
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
               }
             : {
@@ -2351,6 +2697,7 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
                 paymentProvider: "stripe",
                 stripeSessionId: session.id,
                 stripePaymentIntentId,
+                stripeLivemode: event.livemode,
                 paidAt: admin.firestore.FieldValue.serverTimestamp(),
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
               },
@@ -2398,7 +2745,7 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
           );
         }
 
-        return shouldSendPaidEmail;
+        return emailStage;
       });
 
       // クーポンの使用確定。Checkout を作っただけでは used にせず、
@@ -2420,12 +2767,12 @@ export const stripeWebhook = https.onRequest(async (req, res) => {
         reservationId,
         sessionId: session.id,
         scheduleDocId,
-        sendPaidEmail: isFirstPaid,
+        emailStage: firstEmail,
       });
 
-      // 決済確定メール（paymentMethod 未設定の旧予約のみ。カードは capture 時に送る）
-      if (isFirstPaid) {
-        await sendPaymentCompletedEmails(reservationId);
+      // カードは予約受付メール、旧予約は決済確定メール。イベント再送時は送らない
+      if (firstEmail) {
+        await sendPaymentCompletedEmails(reservationId, firstEmail);
       }
     }
 
@@ -3138,6 +3485,585 @@ export const cancelReservation = https.onCall(
       message: isAuthorizedOnly
         ? "予約をキャンセルしました。お支払い前のため請求は発生しません。"
         : "予約をキャンセルし、全額返金の手続きを行いました。",
+    };
+  }
+);
+
+// ========================================
+// Callable: 講師都合のキャンセル
+// レッスン開始時刻まで可能。理由は必須。生徒の負担はゼロ（与信取消または全額返金）、
+// 使ったクーポンは戻す。返金した場合に戻ってこない Stripe の決済手数料は講師の負担とし、
+// teacherCancellations に記録して、月末の精算で講師への支払いから差し引く。
+// 枠は再予約されないよう閉じる（生徒のキャンセルと違い、講師がその時間に来られないため）。
+// ========================================
+
+/** balance_transaction が取れなかったときの決済手数料の見積もり（国内カード 3.6%） */
+const STRIPE_FEE_RATE_FALLBACK = 0.036;
+
+type RefundResult = {
+  refundOutcome: "voided" | "refunded" | "failed";
+  refundId: string | null;
+  /** 返金しても戻らない Stripe の決済手数料（請求前の取消なら 0） */
+  stripeFee: number;
+  stripeFeeEstimated: boolean;
+};
+
+/**
+ * 予約の決済を生徒の負担なしで取り消す（講師都合・運営による取消で共通）。
+ * 予約上は authorized でも、当日0時の capture と競合して既に請求済みの場合があるため、
+ * Stripe の実際の状態を見てから与信取消か全額返金かを選ぶ。失敗しても throw しない。
+ */
+async function voidOrRefundReservation(
+  r: FirebaseFirestore.DocumentData,
+  reservationId: string,
+  logLabel: string
+): Promise<RefundResult> {
+  const paymentIntentId =
+    typeof r.stripePaymentIntentId === "string" ? r.stripePaymentIntentId : "";
+  const charged = typeof r.totalAmount === "number" ? r.totalAmount : 0;
+  const result: RefundResult = {
+    refundOutcome: "failed",
+    refundId: null,
+    stripeFee: 0,
+    stripeFeeEstimated: false,
+  };
+  try {
+    if (!paymentIntentId) throw new Error("stripePaymentIntentId がありません");
+    const stripe = getStripeClient();
+    const pi = await stripe.paymentIntents.retrieve(paymentIntentId, {
+      expand: ["latest_charge.balance_transaction"],
+    });
+
+    if (pi.status === "requires_capture") {
+      await stripe.paymentIntents.cancel(paymentIntentId);
+      result.refundOutcome = "voided";
+    } else if (pi.status === "canceled") {
+      result.refundOutcome = "voided";
+    } else if (pi.status === "succeeded") {
+      const refund = await stripe.refunds.create({ payment_intent: paymentIntentId });
+      result.refundId = refund?.id ?? null;
+      result.refundOutcome = "refunded";
+      const fee = pi.latest_charge?.balance_transaction?.fee;
+      if (typeof fee === "number") {
+        result.stripeFee = fee;
+      } else {
+        result.stripeFee = Math.round(charged * STRIPE_FEE_RATE_FALLBACK);
+        result.stripeFeeEstimated = true;
+      }
+    } else {
+      throw new Error(`想定外の PaymentIntent 状態: ${pi.status}`);
+    }
+  } catch (error) {
+    logger.error(`${logLabel}: 与信取消/返金に失敗（要手動返金）`, {
+      reservationId,
+      paymentIntentId,
+      error,
+    });
+    result.refundOutcome = "failed";
+  }
+
+  // 返金に失敗しても、運営が手動で返金すれば手数料は戻らないので見積もりで記録しておく
+  if (result.refundOutcome === "failed" && r.paymentStatus === "paid") {
+    result.stripeFee = Math.round(charged * STRIPE_FEE_RATE_FALLBACK);
+    result.stripeFeeEstimated = true;
+  }
+  return result;
+}
+
+export const teacherCancelReservation = https.onCall(
+  async (
+    data: { reservationId?: string; reason?: string },
+    context
+  ): Promise<{ ok: boolean; message: string }> => {
+    if (!context.auth) {
+      throw new https.HttpsError("unauthenticated", "ログインが必要です。");
+    }
+
+    const reservationId =
+      typeof data?.reservationId === "string" ? data.reservationId.trim() : "";
+    const reason =
+      typeof data?.reason === "string" ? data.reason.trim().slice(0, 500) : "";
+
+    if (!reservationId) {
+      throw new https.HttpsError("invalid-argument", "予約IDが指定されていません。");
+    }
+    if (!reason) {
+      throw new https.HttpsError(
+        "invalid-argument",
+        "キャンセルの理由を入力してください。"
+      );
+    }
+
+    const db = admin.firestore();
+    const reservationRef = db.collection("reservations").doc(reservationId);
+    const snap = await reservationRef.get();
+    if (!snap.exists) {
+      throw new https.HttpsError("not-found", "予約が見つかりませんでした。");
+    }
+    const r = snap.data() || {};
+
+    if (r.teacherId !== context.auth.uid) {
+      throw new https.HttpsError(
+        "permission-denied",
+        "この予約をキャンセルする権限がありません。"
+      );
+    }
+
+    if (
+      r.reservationStatus !== "confirmed" ||
+      !["paid", "authorized"].includes(r.paymentStatus)
+    ) {
+      throw new https.HttpsError(
+        "failed-precondition",
+        "この予約はキャンセルできません（未決済・キャンセル済み・期限切れのいずれか）。"
+      );
+    }
+
+    // レッスン開始時刻（JST）を過ぎたら不可
+    const lessonDate = typeof r.lessonDate === "string" ? r.lessonDate : "";
+    const lessonTime = typeof r.lessonTime === "string" ? r.lessonTime : "00:00";
+    const startMs = Date.parse(`${lessonDate}T${lessonTime}:00+09:00`);
+    if (!Number.isFinite(startMs) || startMs <= Date.now()) {
+      throw new https.HttpsError(
+        "failed-precondition",
+        "レッスン開始時刻を過ぎた予約はキャンセルできません。運営にお問い合わせください。"
+      );
+    }
+
+    logger.info("teacherCancelReservation start", {
+      reservationId,
+      uid: context.auth.uid,
+      lessonDate,
+      lessonTime,
+      paymentStatus: r.paymentStatus,
+    });
+
+    // ここが失敗しても予約自体はキャンセルする（講師は来られない）。返金は運営が手動で行う。
+    const charged = typeof r.totalAmount === "number" ? r.totalAmount : 0;
+    const { refundOutcome, refundId, stripeFee, stripeFeeEstimated } =
+      await voidOrRefundReservation(r, reservationId, "teacherCancelReservation");
+
+    try {
+      const scheduleDocId = typeof r.scheduleDocId === "string" ? r.scheduleDocId : "";
+      const studioBookingDocId =
+        typeof r.studioBookingDocId === "string" ? r.studioBookingDocId : "";
+
+      await db.runTransaction(async (tx) => {
+        const scheduleRef = scheduleDocId
+          ? db.collection("schedules").doc(scheduleDocId)
+          : null;
+        const studioBookingRef = studioBookingDocId
+          ? db.collection("studioBookings").doc(studioBookingDocId)
+          : null;
+        const scheduleSnap = scheduleRef ? await tx.get(scheduleRef) : null;
+        const studioSnap = studioBookingRef ? await tx.get(studioBookingRef) : null;
+
+        const cancelledBy: CancelInitiator = "teacher";
+        tx.set(
+          reservationRef,
+          {
+            reservationStatus: "cancelled",
+            paymentStatus: refundOutcome === "failed" ? "refund_failed" : refundOutcome,
+            refundId,
+            cancelledBy,
+            cancelReason: reason,
+            cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+
+        // 講師の枠は閉じる（講師がその時間に来られないので再予約させない）
+        if (
+          scheduleRef &&
+          scheduleSnap?.exists &&
+          (scheduleSnap.data() || {}).reservationId === reservationId
+        ) {
+          tx.set(
+            scheduleRef,
+            {
+              status: "closed",
+              isAvailable: false,
+              reservationId: admin.firestore.FieldValue.delete(),
+              reservedAt: admin.firestore.FieldValue.delete(),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+        }
+
+        // スタジオは講師の都合と関係なく他の人が使えるので空ける
+        if (
+          studioBookingRef &&
+          studioSnap?.exists &&
+          (studioSnap.data() || {}).reservationId === reservationId
+        ) {
+          tx.set(
+            studioBookingRef,
+            {
+              status: "open",
+              isAvailable: true,
+              reservationId: admin.firestore.FieldValue.delete(),
+              reservedAt: admin.firestore.FieldValue.delete(),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+        }
+
+        // 講師都合キャンセルの記録。件数の把握と、決済手数料の差し引き（月末精算）に使う
+        tx.set(db.collection("teacherCancellations").doc(reservationId), {
+          reservationId,
+          teacherId: r.teacherId,
+          teacherName: String(r.teacherName ?? ""),
+          studentName: String(r.name ?? ""),
+          lessonDate,
+          lessonTime,
+          lessonAmount: typeof r.lessonAmount === "number" ? r.lessonAmount : 0,
+          chargedAmount: charged,
+          reason,
+          refundOutcome,
+          // 講師への支払いから差し引く額（請求前の取消なら 0）
+          stripeFee,
+          stripeFeeEstimated,
+          // 月末精算で差し引いたら運営が true にする
+          settled: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      });
+    } catch (error) {
+      logger.error(
+        "teacherCancelReservation: Stripe 処理後の Firestore 更新に失敗（要手動対応）",
+        { reservationId, refundOutcome, refundId, error }
+      );
+      throw new https.HttpsError(
+        "internal",
+        "キャンセル処理の途中でエラーが発生しました。お手数ですが運営にお問い合わせください。"
+      );
+    }
+
+    // 講師都合なのでクーポンは使える状態に戻す（COUPON_ON_CANCEL）
+    const usedCouponId = typeof r.couponId === "string" ? r.couponId : "";
+    if (usedCouponId) {
+      if (COUPON_ON_CANCEL.teacher === "restore") {
+        await restoreUsedCoupon(usedCouponId, reservationId);
+      } else {
+        await releaseCoupon(usedCouponId, reservationId);
+      }
+    }
+
+    logger.info("teacherCancelReservation success", {
+      reservationId,
+      refundOutcome,
+      refundId,
+      stripeFee,
+      stripeFeeEstimated,
+      couponId: usedCouponId,
+    });
+
+    // 通知メール（失敗してもキャンセル自体は成功として返す）
+    const moneyLine =
+      refundOutcome === "voided"
+        ? "お支払い前のため、請求は発生しません。"
+        : refundOutcome === "refunded"
+          ? "お支払いいただいた金額は全額返金いたします。返金の反映時期はカード会社等によって異なります。"
+          : "お支払いいただいた金額は全額返金いたします。返金の手続きは運営より行い、完了しましたらご連絡します。";
+
+    const studentEmail = studentEmailOf(r);
+    if (studentEmail) {
+      await sendMailSafe({
+        to: studentEmail,
+        subject: "【Geidai Connect】講師の都合によりご予約がキャンセルになりました",
+        html: buildInfoMailHtml({
+          greetingName: String(r.name || "ご利用者"),
+          intro: [
+            "誠に申し訳ございません。講師の都合により、以下のご予約がキャンセルとなりました。",
+            moneyLine,
+            ...(usedCouponId
+              ? ["ご利用のクーポンは、再びお使いいただける状態に戻しました。"]
+              : []),
+          ],
+          rows: [...reservationRows(r), ["キャンセルの理由", reason]],
+          outro: [
+            "ご迷惑をおかけし申し訳ございません。またのご利用をお待ちしております。",
+          ],
+        }),
+      });
+    }
+
+    await sendMailSafe({
+      to: CONTACT_TO.value(),
+      subject:
+        refundOutcome === "failed"
+          ? "【Geidai Connect】講師都合キャンセル（返金失敗・要手動対応）"
+          : "【Geidai Connect】講師都合キャンセルがありました",
+      html: buildInfoMailHtml({
+        greetingName: "運営ご担当者",
+        intro: [
+          "講師都合のキャンセルがありました。",
+          ...(refundOutcome === "failed"
+            ? [
+                "Stripe での与信取消・返金に失敗しました。Stripe の管理画面から手動で返金してください。",
+              ]
+            : []),
+        ],
+        rows: [
+          ...reservationRows(r),
+          ["予約ID", reservationId],
+          ["生徒氏名", String(r.name ?? "")],
+          ["キャンセルの理由", reason],
+          [
+            "返金",
+            refundOutcome === "voided"
+              ? "与信取消（請求なし）"
+              : refundOutcome === "refunded"
+                ? `全額返金（${refundId ?? ""}）`
+                : "失敗（要手動対応）",
+          ],
+          [
+            "講師負担の決済手数料",
+            stripeFee > 0
+              ? `${stripeFee.toLocaleString("ja-JP")}円${stripeFeeEstimated ? "（見積もり）" : ""}`
+              : "なし",
+          ],
+        ],
+        outro: ["講師ごとの件数と差し引き額は、管理画面の講師詳細から確認できます。"],
+      }),
+    });
+
+    return {
+      ok: true,
+      message:
+        refundOutcome === "voided"
+          ? "予約をキャンセルしました。お支払い前のため、生徒への請求は発生しません。"
+          : refundOutcome === "refunded"
+            ? `予約をキャンセルし、生徒へ全額返金しました。決済手数料 ${stripeFee.toLocaleString("ja-JP")}円 は次回のお支払いから差し引きます。`
+            : "予約をキャンセルしました。生徒への返金は運営が手続きします。",
+    };
+  }
+);
+
+// ========================================
+// Callable: 運営による予約の取り消し（管理画面の予約詳細から）
+// 生徒の負担はゼロ（与信取消または全額返金）、クーポンは戻す。
+// 講師都合と違い、返金で戻らない決済手数料は運営の負担とする（teacherCancellations には記録しない）。
+// レッスン開始後でも取り消せる（当日のトラブル対応のため）。
+// ========================================
+export const adminCancelReservation = https.onCall(
+  async (
+    data: { reservationId?: string; reason?: string; reopenSlot?: boolean },
+    context
+  ): Promise<{ ok: boolean; message: string; refundOutcome: string }> => {
+    const adminUid = await requireAdmin(context);
+
+    const reservationId =
+      typeof data?.reservationId === "string" ? data.reservationId.trim() : "";
+    const reason =
+      typeof data?.reason === "string" ? data.reason.trim().slice(0, 500) : "";
+    const reopenSlot = data?.reopenSlot === true;
+
+    if (!reservationId) {
+      throw new https.HttpsError("invalid-argument", "予約IDが指定されていません。");
+    }
+    if (!reason) {
+      throw new https.HttpsError("invalid-argument", "取り消しの理由を入力してください。");
+    }
+
+    const db = admin.firestore();
+    const reservationRef = db.collection("reservations").doc(reservationId);
+    const snap = await reservationRef.get();
+    if (!snap.exists) {
+      throw new https.HttpsError("not-found", "予約が見つかりませんでした。");
+    }
+    const r = snap.data() || {};
+
+    if (
+      r.reservationStatus !== "confirmed" ||
+      !["paid", "authorized"].includes(r.paymentStatus)
+    ) {
+      throw new https.HttpsError(
+        "failed-precondition",
+        "この予約は取り消せません（未決済・キャンセル済み・期限切れのいずれか）。"
+      );
+    }
+
+    logger.info("adminCancelReservation start", {
+      reservationId,
+      adminUid,
+      paymentStatus: r.paymentStatus,
+      reopenSlot,
+    });
+
+    const { refundOutcome, refundId, stripeFee, stripeFeeEstimated } =
+      await voidOrRefundReservation(r, reservationId, "adminCancelReservation");
+
+    // 枠を空け直すのは、まだ始まっていないレッスンで運営が希望した場合だけ
+    const lessonDate = typeof r.lessonDate === "string" ? r.lessonDate : "";
+    const lessonTime = typeof r.lessonTime === "string" ? r.lessonTime : "00:00";
+    const startMs = Date.parse(`${lessonDate}T${lessonTime}:00+09:00`);
+    const canReopen = reopenSlot && Number.isFinite(startMs) && startMs > Date.now();
+
+    try {
+      const scheduleDocId = typeof r.scheduleDocId === "string" ? r.scheduleDocId : "";
+      const studioBookingDocId =
+        typeof r.studioBookingDocId === "string" ? r.studioBookingDocId : "";
+
+      await db.runTransaction(async (tx) => {
+        const scheduleRef = scheduleDocId
+          ? db.collection("schedules").doc(scheduleDocId)
+          : null;
+        const studioBookingRef = studioBookingDocId
+          ? db.collection("studioBookings").doc(studioBookingDocId)
+          : null;
+        const scheduleSnap = scheduleRef ? await tx.get(scheduleRef) : null;
+        const studioSnap = studioBookingRef ? await tx.get(studioBookingRef) : null;
+
+        const cancelledBy: CancelInitiator = "operator";
+        tx.set(
+          reservationRef,
+          {
+            reservationStatus: "cancelled",
+            paymentStatus: refundOutcome === "failed" ? "refund_failed" : refundOutcome,
+            refundId,
+            cancelledBy,
+            cancelReason: reason,
+            cancelledByAdminUid: adminUid,
+            // 運営負担になる決済手数料（集計用）
+            operatorStripeFee: stripeFee,
+            operatorStripeFeeEstimated: stripeFeeEstimated,
+            cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+
+        if (
+          scheduleRef &&
+          scheduleSnap?.exists &&
+          (scheduleSnap.data() || {}).reservationId === reservationId
+        ) {
+          tx.set(
+            scheduleRef,
+            {
+              status: canReopen ? "open" : "closed",
+              isAvailable: canReopen,
+              reservationId: admin.firestore.FieldValue.delete(),
+              reservedAt: admin.firestore.FieldValue.delete(),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+        }
+
+        if (
+          studioBookingRef &&
+          studioSnap?.exists &&
+          (studioSnap.data() || {}).reservationId === reservationId
+        ) {
+          tx.set(
+            studioBookingRef,
+            {
+              status: "open",
+              isAvailable: true,
+              reservationId: admin.firestore.FieldValue.delete(),
+              reservedAt: admin.firestore.FieldValue.delete(),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+        }
+      });
+    } catch (error) {
+      logger.error(
+        "adminCancelReservation: Stripe 処理後の Firestore 更新に失敗（要手動対応）",
+        { reservationId, refundOutcome, refundId, error }
+      );
+      throw new https.HttpsError(
+        "internal",
+        `Stripe の処理（${refundOutcome}）の後で予約の更新に失敗しました。ログを確認してください。`
+      );
+    }
+
+    const usedCouponId = typeof r.couponId === "string" ? r.couponId : "";
+    if (usedCouponId) {
+      if (COUPON_ON_CANCEL.operator === "restore") {
+        await restoreUsedCoupon(usedCouponId, reservationId);
+      } else {
+        await releaseCoupon(usedCouponId, reservationId);
+      }
+    }
+
+    logger.info("adminCancelReservation success", {
+      reservationId,
+      refundOutcome,
+      refundId,
+      stripeFee,
+      couponId: usedCouponId,
+    });
+
+    const moneyLine =
+      refundOutcome === "voided"
+        ? "お支払い前のため、請求は発生しません。"
+        : refundOutcome === "refunded"
+          ? "お支払いいただいた金額は全額返金いたします。返金の反映時期はカード会社等によって異なります。"
+          : "お支払いいただいた金額は全額返金いたします。返金の手続きが完了しましたらご連絡します。";
+
+    const studentEmail = studentEmailOf(r);
+    if (studentEmail) {
+      await sendMailSafe({
+        to: studentEmail,
+        subject: "【Geidai Connect】ご予約を取り消しました",
+        html: buildInfoMailHtml({
+          greetingName: String(r.name || "ご利用者"),
+          intro: [
+            "運営事務局にて、以下のご予約を取り消しました。",
+            moneyLine,
+            ...(usedCouponId
+              ? ["ご利用のクーポンは、再びお使いいただける状態に戻しました。"]
+              : []),
+          ],
+          rows: [...reservationRows(r), ["取り消しの理由", reason]],
+          outro: [
+            "ご不明な点は、このメールへの返信またはお問い合わせフォームからご連絡ください。",
+          ],
+        }),
+      });
+    }
+
+    const teacherId = typeof r.teacherId === "string" ? r.teacherId : "";
+    if (teacherId) {
+      const teacher = await getUserContact(teacherId);
+      if (teacher.email) {
+        await sendMailSafe({
+          to: teacher.email,
+          subject: "【Geidai Connect】運営にて予約を取り消しました",
+          html: buildInfoMailHtml({
+            greetingName: teacher.displayName || String(r.teacherName || "講師"),
+            intro: [
+              "運営事務局にて、以下の予約を取り消しました。生徒への返金は運営が行います。",
+              canReopen
+                ? "該当の時間枠は再び予約できる状態に戻しています。"
+                : "該当の時間枠は閉じています。",
+            ],
+            rows: [
+              ...reservationRows(r),
+              ["生徒氏名", String(r.name ?? "")],
+              ["取り消しの理由", reason],
+            ],
+          }),
+        });
+      }
+    }
+
+    return {
+      ok: true,
+      refundOutcome,
+      message:
+        refundOutcome === "voided"
+          ? "予約を取り消しました（与信取消・請求なし）。"
+          : refundOutcome === "refunded"
+            ? `予約を取り消し、全額返金しました（返金ID: ${refundId ?? ""}）。`
+            : "予約は取り消しましたが、Stripe での返金に失敗しました。Stripe の管理画面から手動で返金してください。",
     };
   }
 );

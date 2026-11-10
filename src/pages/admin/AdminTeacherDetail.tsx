@@ -1,6 +1,16 @@
-// 管理者用: 講師ごとの詳細（月次/年次の売上・成約数、累計、レビュー平均、直近の予約）。
-import React, { useMemo, useState } from "react";
+// 管理者用: 講師ごとの詳細（月次/年次の売上・成約数、累計、レビュー平均、直近の予約、講師都合キャンセル）。
+import React, { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import {
+  collection,
+  doc,
+  getDocs,
+  query,
+  serverTimestamp,
+  updateDoc,
+  where,
+} from "firebase/firestore";
+import { db } from "../../firebase";
 import {
   ResponsiveContainer,
   BarChart,
@@ -24,9 +34,90 @@ import {
 const GOLD = "#b89f6b";
 const DARK_GOLD = "#7a6a3f";
 
+/** 講師都合キャンセルの記録（functions の teacherCancelReservation が作る） */
+interface TeacherCancellation {
+  id: string;
+  lessonDate: string;
+  lessonTime: string;
+  studentName: string;
+  reason: string;
+  refundOutcome: string;
+  stripeFee: number;
+  stripeFeeEstimated: boolean;
+  settled: boolean;
+}
+
+const REFUND_OUTCOME_LABELS: Record<string, string> = {
+  voided: "与信取消（請求なし）",
+  refunded: "全額返金",
+  failed: "返金失敗（要手動対応）",
+};
+
 const AdminTeacherDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { reservations, users, reviews, loading, error } = useAdminData();
+  const [cancellations, setCancellations] = useState<TeacherCancellation[]>([]);
+  const [settlingId, setSettlingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!id) return;
+    let alive = true;
+    getDocs(query(collection(db, "teacherCancellations"), where("teacherId", "==", id)))
+      .then((snap) => {
+        if (!alive) return;
+        const list = snap.docs.map((d) => {
+          const x = d.data();
+          return {
+            id: d.id,
+            lessonDate: typeof x.lessonDate === "string" ? x.lessonDate : "",
+            lessonTime: typeof x.lessonTime === "string" ? x.lessonTime : "",
+            studentName: typeof x.studentName === "string" ? x.studentName : "",
+            reason: typeof x.reason === "string" ? x.reason : "",
+            refundOutcome: typeof x.refundOutcome === "string" ? x.refundOutcome : "",
+            stripeFee: typeof x.stripeFee === "number" ? x.stripeFee : 0,
+            stripeFeeEstimated: x.stripeFeeEstimated === true,
+            settled: x.settled === true,
+          };
+        });
+        list.sort((a, b) => b.lessonDate.localeCompare(a.lessonDate));
+        setCancellations(list);
+      })
+      .catch((err) => console.error("講師都合キャンセルの取得に失敗しました:", err));
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+
+  const unsettledFee = useMemo(
+    () => cancellations.reduce((s, c) => (c.settled ? s : s + c.stripeFee), 0),
+    [cancellations]
+  );
+
+  /** 月末精算で講師への支払いから差し引いたら、精算済みの印を付ける */
+  const markSettled = async (c: TeacherCancellation) => {
+    if (
+      !window.confirm(
+        `${c.lessonDate} ${c.lessonTime}（${c.studentName}）の決済手数料 ${yen(c.stripeFee)} を精算済みにします。よろしいですか？`
+      )
+    ) {
+      return;
+    }
+    setSettlingId(c.id);
+    try {
+      await updateDoc(doc(db, "teacherCancellations", c.id), {
+        settled: true,
+        settledAt: serverTimestamp(),
+      });
+      setCancellations((prev) =>
+        prev.map((x) => (x.id === c.id ? { ...x, settled: true } : x))
+      );
+    } catch (err) {
+      console.error("精算済みにできませんでした:", err);
+      alert("精算済みにできませんでした。");
+    } finally {
+      setSettlingId(null);
+    }
+  };
 
   const teacher = useMemo(
     () => users.find((u) => u.id === id),
@@ -122,6 +213,11 @@ const AdminTeacherDetail: React.FC = () => {
           <p className="kpi-value">{totals.count}件</p>
         </div>
         <div className="kpi-card">
+          <p className="kpi-label">講師都合キャンセル</p>
+          <p className="kpi-value">{cancellations.length}件</p>
+          <p className="kpi-sub">未精算の差引額 {yen(unsettledFee)}</p>
+        </div>
+        <div className="kpi-card">
           <p className="kpi-label">レビュー平均</p>
           <p className="kpi-value">
             {rating ? `★${rating.avg.toFixed(1)}` : "―"}
@@ -193,6 +289,68 @@ const AdminTeacherDetail: React.FC = () => {
                     <td>{r.lessonCourse || "―"}</td>
                     <td className="num">{yen(r.lessonAmount)}</td>
                     <td>{r.paymentStatus === "paid" ? "支払済み" : r.paymentStatus || "―"}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="admin-chart-card">
+        <h3>講師都合のキャンセル</h3>
+        <p style={{ color: "#8a8270", fontSize: "0.9rem" }}>
+          返金して戻ってこなかった Stripe の決済手数料は講師の負担です。
+          月末の精算で講師への支払いから差し引いたら「精算済みにする」を押してください。
+        </p>
+        <div style={{ overflowX: "auto" }}>
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>日時</th>
+                <th>生徒</th>
+                <th>理由</th>
+                <th>返金</th>
+                <th className="num">差引額</th>
+                <th>精算</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cancellations.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ color: "#a49b85" }}>
+                    講師都合のキャンセルはありません。
+                  </td>
+                </tr>
+              ) : (
+                cancellations.map((c) => (
+                  <tr key={c.id}>
+                    <td>
+                      {c.lessonDate} {c.lessonTime}
+                    </td>
+                    <td>{c.studentName || "―"}</td>
+                    <td>{c.reason || "―"}</td>
+                    <td>{REFUND_OUTCOME_LABELS[c.refundOutcome] || c.refundOutcome || "―"}</td>
+                    <td className="num">
+                      {c.stripeFee > 0
+                        ? `${yen(c.stripeFee)}${c.stripeFeeEstimated ? "（見積）" : ""}`
+                        : "―"}
+                    </td>
+                    <td>
+                      {c.stripeFee <= 0 ? (
+                        "―"
+                      ) : c.settled ? (
+                        "精算済み"
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => markSettled(c)}
+                          disabled={settlingId === c.id}
+                        >
+                          {settlingId === c.id ? "更新中..." : "精算済みにする"}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))
               )}
