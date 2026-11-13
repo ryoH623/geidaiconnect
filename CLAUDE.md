@@ -77,6 +77,11 @@ firebase deploy --only functions   # デプロイ（predeploy で lint と build
 - 講師の入力補助として「距離から自動で入れる」がある（プロフィール編集画面のみ・段階は保存しない）。起点は講師の市区町村＋町名の代表座標、終点は区役所の位置（[src/data/tokyoWards.ts](src/data/tokyoWards.ts)）で、直線距離の段階ごとに金額を入れる。入れた金額は講師が区ごとに直せる。
 - 23区の一覧と判定は [functions/src/areaFees.ts](functions/src/areaFees.ts) と [src/lib/teacherProfiles.ts](src/lib/teacherProfiles.ts) の両方にある。片方を変えたらもう片方も揃えること。
 
+### スタジオ予約（生徒の検索）
+
+- 予約フォームはレッスン日時と場所がそろうと `getAvailableStudios` を自動で呼ぶ（検索ボタンはない）。場所の初期値は `users/{uid}.lastStudioSearch`（前回のスタジオ予約時の探し方。決済画面へ移る直前にフロントが保存）、無ければ会員情報の都道府県・市区町村。前回のスタジオに空きがあれば一覧の先頭に出して選んでおく。
+- `getAvailableStudios` は指定の半径で0件なら 3→5→10→20km の段階で自動で広げ（`expandedRadiusKm`）、それでも0件なら同じ日の講師の別の空き枠（スタジオ可）で探して `alternatives` を返す。外部カレンダー照会を増やしすぎないよう、外側の段階・別の時間は必要なときだけ、件数も絞って調べる。
+
 ### 月末精算
 
 - `/admin/settlements` で月・講師ごとに「講師取り分 − 未精算の講師都合キャンセル手数料 = 振込額」を出し、CSV に書き出す。

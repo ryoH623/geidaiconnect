@@ -774,7 +774,85 @@ function isValidStudentCoords(lat: unknown, lng: unknown): boolean {
 type GetAvailableStudiosResult = {
   ok: boolean;
   studios: AvailableStudioItem[];
+  /** 指定の半径では空きが無く、自動で広げて見つけたときの半径(km) */
+  expandedRadiusKm?: number;
+  /** 空きが無いとき、同じ日の別の時間で空きスタジオがある時間と件数 */
+  alternatives?: { time: string; count: number }[];
 };
+
+/** 0件のときに自動で広げる検索半径の段階(km)。フロントの選択肢と揃える */
+const STUDIO_RADIUS_STEPS_KM = [3, 5, 10, 20];
+/** 0件のときに空きを確かめる、同じ日の別の時間の数（外部カレンダー照会を増やしすぎない） */
+const MAX_ALTERNATIVE_TIMES_CHECKED = 4;
+/** 生徒に提案する別の時間の数 */
+const MAX_ALTERNATIVE_TIMES = 3;
+
+/** 空き確認の前段（場所・講師の対応エリア）を通ったスタジオ候補 */
+type StudioCandidate = {
+  id: string;
+  data: FirebaseFirestore.DocumentData;
+  /** 講師拠点からの距離(km)。拠点未設定なら null */
+  distanceKm: number | null;
+  /** 生徒の基準地点からの距離(km)。座標未指定なら null */
+  studentDistanceKm: number | null;
+  areaFee: number;
+};
+
+function roundKm(km: number | null): number | null {
+  return km === null ? null : Math.round(km * 10) / 10;
+}
+
+function toAvailableStudioItem(c: StudioCandidate): AvailableStudioItem {
+  return {
+    id: c.id,
+    name: typeof c.data.name === "string" ? c.data.name : c.id,
+    address: typeof c.data.address === "string" ? c.data.address : undefined,
+    pricePerSlot:
+      typeof c.data.pricePerSlot === "number" ? c.data.pricePerSlot : 0,
+    distanceKm: roundKm(c.distanceKm),
+    studentDistanceKm: roundKm(c.studentDistanceKm),
+    areaFee: c.areaFee,
+  };
+}
+
+/**
+ * 講師の同じ日の空き枠のうち、スタジオで受けられる別の時間を近い順に返す。
+ * 過去の時間と、指定した時間そのものは除く。
+ */
+async function loadTeacherStudioTimesOfDay(
+  teacherId: string,
+  date: string,
+  exceptTime: string,
+  now: Date
+): Promise<string[]> {
+  // 複合インデックスを避けるため teacherId の等価条件だけで引き、日付はメモリ上で絞る
+  const snap = await admin
+    .firestore()
+    .collection("schedules")
+    .where("teacherId", "==", teacherId)
+    .get();
+
+  const base = timeToMin(exceptTime);
+  const times: string[] = [];
+  for (const doc of snap.docs) {
+    const s = doc.data() || {};
+    if (s.date !== date || typeof s.time !== "string" || s.time === exceptTime) {
+      continue;
+    }
+    if (s.reserved === true || s.isAvailable === false) continue;
+    const st = String(s.status || "").toLowerCase();
+    if (UNAVAILABLE_STATUSES.has(st) && !isPendingExpired(s, now)) continue;
+    // lessonMethods が空・未設定の古い枠は全方法を受け付ける扱い（予約作成時の検証と同じ）
+    const methods = Array.isArray(s.lessonMethods) ? s.lessonMethods : [];
+    if (methods.length > 0 && !methods.includes("スタジオ")) continue;
+    if (new Date(`${date}T${s.time}:00+09:00`).getTime() <= now.getTime()) continue;
+    times.push(s.time);
+  }
+
+  return Array.from(new Set(times)).sort(
+    (a, b) => Math.abs(timeToMin(a) - base) - Math.abs(timeToMin(b) - base)
+  );
+}
 
 function addMinutesToDate(date: Date, minutes: number): Date {
   return new Date(date.getTime() + minutes * 60 * 1000);
@@ -1319,9 +1397,18 @@ export const getAvailableStudios = https.onCall(
       ? studiosRef.get()
       : studiosRef.where("prefecture", "==", prefecture).get());
 
-    const results: AvailableStudioItem[] = [];
     const now = new Date();
 
+    // 0件のときに自動で広げる段階。指定の半径より広い段階だけを使う
+    const radiusSteps =
+      radiusKm === null
+        ? []
+        : [radiusKm, ...STUDIO_RADIUS_STEPS_KM.filter((km) => km > radiusKm)];
+    const maxRadiusKm =
+      radiusSteps.length > 0 ? radiusSteps[radiusSteps.length - 1] : null;
+
+    // ── 前段: 時間に関係なく決まる条件（場所・講師の到達可否・対応エリア）で絞る ──
+    const candidates: StudioCandidate[] = [];
     for (const doc of snap.docs) {
       const s = doc.data() || {};
       const studioId = typeof s.id === "string" && s.id ? s.id : doc.id;
@@ -1330,14 +1417,14 @@ export const getAvailableStudios = https.onCall(
       if (typeof s.lat !== "number" || typeof s.lng !== "number") continue;
 
       // 生徒が指定した基準地点（町名の代表座標または駅）からの直線距離
-      const studentDistanceRawKm = hasStudentCoords
+      const studentDistanceKm = hasStudentCoords
         ? haversineKm(studentLat as number, studentLng as number, s.lat, s.lng)
         : null;
 
-      // 0) 生徒からの距離で絞り込む。半径指定がない場合のみ市区町村の一致で絞る
-      //    （市区町村の完全一致だけだと、区が違うだけの最寄りスタジオが落ちてしまうため）
-      if (radiusKm !== null) {
-        if (studentDistanceRawKm === null || studentDistanceRawKm > radiusKm) {
+      // 0) 生徒からの距離で絞り込む（自動で広げる最大の半径まで）。半径指定がない場合のみ
+      //    市区町村の一致で絞る（完全一致だけだと、区が違うだけの最寄りスタジオが落ちるため）
+      if (maxRadiusKm !== null) {
+        if (studentDistanceKm === null || studentDistanceKm > maxRadiusKm) {
           continue;
         }
       } else if (city && s.city !== city) {
@@ -1355,73 +1442,127 @@ export const getAvailableStudios = https.onCall(
       const areaFee = areaFeeFor(areaFees, studioWard(s));
       if (areaFee === null) continue;
 
+      candidates.push({ id: studioId, data: s, distanceKm, studentDistanceKm, areaFee });
+    }
+
+    // 近い順に並べる（距離不明は末尾）。生徒座標があれば生徒基準、なければ講師拠点基準
+    const kmOf = (c: StudioCandidate) =>
+      hasStudentCoords ? c.studentDistanceKm : c.distanceKm;
+    candidates.sort((a, b) => {
+      const aKm = kmOf(a);
+      const bKm = kmOf(b);
+      if (aKm === null) return bKm === null ? 0 : 1;
+      if (bKm === null) return -1;
+      return aKm - bKm;
+    });
+
+    // ── 後段: 指定の時間にそのスタジオが空いていて、講師の移動も間に合うか ──
+    const isFreeAt = async (c: StudioCandidate, t: string): Promise<boolean> => {
       // 2) 自アプリ内ロック（決定的ドキュメント ID を直読み）
-      const bookingDocId = buildStudioBookingDocId(studioId, date, time);
       const bookingSnap = await admin
         .firestore()
         .collection("studioBookings")
-        .doc(bookingDocId)
+        .doc(buildStudioBookingDocId(c.id, date, t))
         .get();
       if (bookingSnap.exists) {
         const b = bookingSnap.data() || {};
         const st = String(b.status || "").toLowerCase();
         // 期限切れの pending（決済未完了のまま放置された仮押さえ）は空き扱い
         if (UNAVAILABLE_STATUSES.has(st) && !isPendingExpired(b, now)) {
-          continue;
+          return false;
         }
       }
 
       // 3) 外部（Google カレンダー）空き
       const free = await isStudioFreeExternal(
-        typeof s.calendarId === "string" ? s.calendarId : "",
+        typeof c.data.calendarId === "string" ? c.data.calendarId : "",
         date,
-        time
+        t
       );
-      if (!free) continue;
+      if (!free) return false;
 
-      // 4) 同日の前後予約から、このスタジオへ移動が間に合うか（間に合わなければ除外）
-      if (Number.isFinite(candStart) && dayBookings.length > 0) {
+      // 4) 同日の前後予約から、このスタジオへ移動が間に合うか
+      const start = timeToMin(t);
+      if (Number.isFinite(start) && dayBookings.length > 0) {
         const candBooking: DayBooking = {
-          start: candStart,
-          end: candStart + durationMin,
-          loc: { lat: s.lat, lng: s.lng, key: `studio:${studioId}` },
+          start,
+          end: start + durationMin,
+          loc: { lat: c.data.lat, lng: c.data.lng, key: `studio:${c.id}` },
         };
-        if (findScheduleConflict(candBooking, dayBookings)) continue;
+        if (findScheduleConflict(candBooking, dayBookings)) return false;
       }
+      return true;
+    };
 
-      const studentDistanceKm =
-        studentDistanceRawKm === null
-          ? null
-          : Math.round(studentDistanceRawKm * 10) / 10;
+    const freeAmong = async (
+      list: StudioCandidate[],
+      t: string
+    ): Promise<StudioCandidate[]> => {
+      const flags = await Promise.all(list.map((c) => isFreeAt(c, t)));
+      return list.filter((_, i) => flags[i]);
+    };
 
-      results.push({
-        id: studioId,
-        name: typeof s.name === "string" ? s.name : studioId,
-        address: typeof s.address === "string" ? s.address : undefined,
-        pricePerSlot:
-          typeof s.pricePerSlot === "number" ? s.pricePerSlot : 0,
-        distanceKm:
-          distanceKm === null ? null : Math.round(distanceKm * 10) / 10,
-        studentDistanceKm,
-        areaFee,
-      });
+    // 指定の半径で0件なら、段階ごとに広げて最初に見つかった範囲までを返す。
+    // 外側の段階は内側で見つからなかったときだけ照会する（外部カレンダー照会を減らすため）
+    let results: StudioCandidate[] = [];
+    let usedRadiusKm = radiusKm;
+    if (radiusKm === null) {
+      results = await freeAmong(candidates, time);
+    } else {
+      let innerKm = -1;
+      for (const stepKm of radiusSteps) {
+        const ring = candidates.filter(
+          (c) =>
+            (c.studentDistanceKm as number) > innerKm &&
+            (c.studentDistanceKm as number) <= stepKm
+        );
+        results.push(...(await freeAmong(ring, time)));
+        usedRadiusKm = stepKm;
+        innerKm = stepKm;
+        if (results.length > 0) break;
+      }
     }
 
-    // 近い順に並べる（距離不明は末尾）。生徒座標があれば生徒基準、なければ講師拠点基準
-    results.sort((a, b) => {
-      const aKm = hasStudentCoords ? a.studentDistanceKm : a.distanceKm;
-      const bKm = hasStudentCoords ? b.studentDistanceKm : b.distanceKm;
-      if (aKm === null) return bKm === null ? 0 : 1;
-      if (bKm === null) return -1;
-      return aKm - bKm;
-    });
+    // それでも0件なら、同じ日の講師の別の空き時間で探して提案する
+    let alternatives: { time: string; count: number }[] = [];
+    if (results.length === 0 && candidates.length > 0) {
+      const pool =
+        usedRadiusKm === null
+          ? candidates
+          : candidates.filter(
+              (c) => (c.studentDistanceKm as number) <= (usedRadiusKm as number)
+            );
+      const times = (
+        await loadTeacherStudioTimesOfDay(teacherId, date, time, now)
+      ).slice(0, MAX_ALTERNATIVE_TIMES_CHECKED);
+      const counts = await Promise.all(
+        times.map(async (t) => (await freeAmong(pool, t)).length)
+      );
+      alternatives = times
+        .map((t, i) => ({ time: t, count: counts[i] }))
+        .filter((a) => a.count > 0)
+        .slice(0, MAX_ALTERNATIVE_TIMES)
+        .sort((a, b) => timeToMin(a.time) - timeToMin(b.time));
+    }
+
+    const expandedRadiusKm =
+      results.length > 0 && radiusKm !== null && usedRadiusKm !== radiusKm
+        ? (usedRadiusKm as number)
+        : undefined;
 
     logger.info("getAvailableStudios result", {
       teacherId,
       count: results.length,
+      expandedRadiusKm,
+      alternatives,
     });
 
-    return { ok: true, studios: results };
+    return {
+      ok: true,
+      studios: results.map(toAvailableStudioItem),
+      ...(expandedRadiusKm !== undefined ? { expandedRadiusKm } : {}),
+      ...(alternatives.length > 0 ? { alternatives } : {}),
+    };
   }
 );
 
